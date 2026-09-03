@@ -9,9 +9,10 @@ venv/
 ENV/
 .venv
 
-# Workspaces, Local Outputs & Developer Scratch
+# Workspaces, Local Databases & Developer Scratch
 workspace/
 ignore-files/
+*.db
 *.log
 
 # OS / IDE
