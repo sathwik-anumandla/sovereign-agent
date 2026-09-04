@@ -1,6 +1,6 @@
 """
-test_router.py (SIH PS 26117)
-=============================
+tests/test_router.py (SIH PS 26117)
+===================================
 Standalone test harness for Phase 4 Router / Classifier.
 Tests 16 sample requests across Stage 1 (Metadata), Stage 2 (Keyword), and Stage 3 (Classifier).
 """
@@ -8,7 +8,8 @@ Tests 16 sample requests across Stage 1 (Metadata), Stage 2 (Keyword), and Stage
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 
 from router import route, FileMetadata
 

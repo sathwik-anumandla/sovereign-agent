@@ -1,12 +1,12 @@
 """
-Phase 1, 3 & 6: Multi-Model Inference & Tool Calling Module
-===========================================================
+Phase 1, 3, 6 & 7: Multi-Model Inference & Tool Calling Module
+===============================================================
 Target: SIH 2026 PS 26117 Air-Gapped Sovereign AI Workbench
 
 Functionality:
-- Implement run_inference and run_inference_raw for Ollama chat API with function tool support.
-- Role-to-model tag resolution (qwen3.5:4b-q4_K_M for reasoning/vision, qwen2.5-coder:3b for coding).
-- keep_alive VRAM caching ("5m").
+- Role-to-model tag resolution (qwen3.5:4b-q4_K_M for reasoning/vision, qwen2.5-coder:3b for coding, qwen2.5-vl:3b for ocr/vision_ocr).
+- run_inference supporting prompt, image_paths, streaming, and thinking traces.
+- run_inference_raw for Ollama chat API with function tool support.
 """
 
 import time
@@ -18,9 +18,10 @@ import ollama
 # Role -> Concrete Ollama Model Tag Registry
 MODEL_REGISTRY = {
     "reasoning": "qwen3.5:4b-q4_K_M",
-    "vision": "qwen3.5:4b-q4_K_M",    # Shared with reasoning model -> 0s VRAM swap
+    "vision": "qwen3.5:4b-q4_K_M",      # Shared with reasoning model -> 0s VRAM swap
     "coding": "qwen2.5-coder:3b",
-    "ocr": "qwen2.5-vl:3b"
+    "ocr": "qwen2.5-vl:3b",
+    "vision_ocr": "qwen2.5-vl:3b"       # Dedicated Vision-OCR fallback model
 }
 
 # Role-specific system prompts
@@ -40,6 +41,10 @@ ROLE_SYSTEM_PROMPTS = {
     "ocr": (
         "You are an expert document OCR transcription model. Accurately transcribe all printed "
         "and handwritten text from the document image."
+    ),
+    "vision_ocr": (
+        "You are an expert document layout and text extraction vision model. Extract all text, "
+        "headers, key-value pairs, and table data accurately from the input document image."
     )
 }
 
@@ -73,7 +78,7 @@ def resolve_model_tag(role: str = "reasoning", model: str = None) -> str:
             return tag
         if role.lower() in ("reasoning", "vision") and ("qwen3.5" in tag.lower() or "qwen3" in tag.lower() or "4b" in tag.lower()):
             return tag
-        if role.lower() == "ocr" and ("vl" in tag.lower() or "ocr" in tag.lower()):
+        if role.lower() in ("ocr", "vision_ocr") and ("vl" in tag.lower() or "ocr" in tag.lower()):
             return tag
             
     if installed:
@@ -122,7 +127,6 @@ def run_inference_raw(
     try:
         res = ollama.chat(**kwargs)
         msg = res.get("message", {})
-        # Convert message object/dict to dict
         if hasattr(msg, "model_dump"):
             return msg.model_dump()
         elif isinstance(msg, dict):
@@ -138,12 +142,14 @@ def run_inference(
     stream: bool = False,
     thinking: bool = False,
     model: str = None,
-    image_paths: list[str] = None,
+    image_paths: Optional[List[str]] = None,
+    images: Optional[List[str]] = None,
     tools: Optional[List[Dict[str, Any]]] = None,
     keep_alive: str = "5m"
 ) -> Union[str, Generator[str, None, None]]:
     """
     Multi-model Python inference function for Ollama models with Vision and Tool support.
+    Supports both image_paths and images parameter for backward compatibility.
     """
     selected_model = resolve_model_tag(role=role, model=model)
     base_sys_prompt = ROLE_SYSTEM_PROMPTS.get(role.lower().strip(), ROLE_SYSTEM_PROMPTS["reasoning"])
@@ -158,8 +164,9 @@ def run_inference(
         {"role": "user", "content": prompt}
     ]
     
-    if image_paths:
-        messages[1]["images"] = image_paths
+    effective_images = image_paths or images
+    if effective_images:
+        messages[1]["images"] = effective_images
     
     options = {
         "temperature": 0.7 if (thinking or role == "reasoning") else 0.2

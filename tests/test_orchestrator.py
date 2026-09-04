@@ -1,6 +1,6 @@
 """
-test_orchestrator.py (SIH PS 26117)
-===================================
+tests/test_orchestrator.py (SIH PS 26117)
+=========================================
 Phase 5 Test Suite for LangGraph Orchestrator Skeleton.
 Verifies end-to-end execution, model routing, persistent SQLite checkpointing,
 process restart persistence, file metadata passing, and inspect_run.py thread history inspection.
@@ -8,10 +8,10 @@ process restart persistence, file metadata passing, and inspect_run.py thread hi
 
 import os
 import sys
-import subprocess
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 
 from router.schemas import FileMetadata
 from orchestrator import run_workbench, DB_FILENAME

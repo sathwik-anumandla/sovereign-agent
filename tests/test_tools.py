@@ -1,8 +1,8 @@
 """
-Phase 2 Test Harness: test_tools.py (SIH PS 26117)
-==================================================
-Runs 2-3 standalone test cases per tool to establish a known-good baseline 
-prior to Phase 6 LangGraph orchestrator integration.
+Phase 2 Test Harness: tests/test_tools.py (SIH PS 26117)
+=========================================================
+Runs standalone test cases per tool to establish a known-good baseline 
+prior to orchestrator integration.
 """
 
 import sys
@@ -11,8 +11,9 @@ import cv2
 import numpy as np
 from pathlib import Path
 
-# Add current directory to python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add project root directory to python path
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 
 from tool_interface import ToolStatus
 from tools.math_eval import math_eval, MathEvalInput
@@ -188,7 +189,7 @@ def test_ocr_vlm_tool():
     print("TESTING TOOL 6: ocr_vlm")
     print("=" * 60)
 
-    img_path = Path(os.getcwd()) / "workspace" / SESSION_ID / "test_diagram.png"
+    img_path = Path(ROOT_DIR) / "workspace" / SESSION_ID / "test_diagram.png"
     img_path.parent.mkdir(parents=True, exist_ok=True)
 
     dummy_img = np.full((300, 600, 3), 255, dtype=np.uint8)
@@ -198,12 +199,15 @@ def test_ocr_vlm_tool():
     # Test 6.1: Run Diagram Analysis
     inp1 = OCRVLMInput(file_path="test_diagram.png", input_type="diagram", extract_mode="describe", session_id=SESSION_ID)
     res1 = ocr_vlm(inp1)
-    record_result("ocr_vlm", "P&ID Diagram Analysis", res1.status == ToolStatus.SUCCESS and res1.engine_used == "vlm", f"Engine: {res1.engine_used}, Confidence: {res1.confidence}")
+    engine_used = res1.metadata.get("engine_used")
+    conf = res1.metadata.get("confidence")
+    record_result("ocr_vlm", "P&ID Diagram Analysis", res1.status == ToolStatus.SUCCESS and engine_used == "vlm", f"Engine: {engine_used}, Confidence: {conf}")
 
     # Test 6.2: Run Text Extraction
     inp2 = OCRVLMInput(file_path="test_diagram.png", input_type="printed", extract_mode="text", session_id=SESSION_ID)
     res2 = ocr_vlm(inp2)
-    record_result("ocr_vlm", "Printed Document Text Extraction", res2.status == ToolStatus.SUCCESS, f"Engine: {res2.engine_used}")
+    engine_used_2 = res2.metadata.get("engine_used")
+    record_result("ocr_vlm", "Printed Document Text Extraction", res2.status == ToolStatus.SUCCESS, f"Engine: {engine_used_2}")
 
 
 if __name__ == "__main__":

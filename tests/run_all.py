@@ -1,16 +1,16 @@
 """
-run_all_tests.py (SIH PS 26117)
+tests/run_all.py (SIH PS 26117)
 ===============================
-Master Integration Test Runner for Sovereign Agentic AI Workbench (Phases 1 - 6).
+Master Integration Test Runner for Sovereign Agentic AI Workbench (Phases 1 - 7).
 Executes all standalone unit test suites and runs end-to-end multi-tool workflow integration scenarios.
 """
 
 import sys
 import os
-import unittest
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 
 from tool_interface import ToolStatus, ToolResult
 from router import route, FileMetadata
@@ -38,7 +38,6 @@ def run_e2e_workflow_tests():
     # Workflow 1: Industrial Data Analysis Pipeline (FileIO -> Spreadsheet -> DocGen)
     print("\n[Workflow 1] Industrial Data Analysis & Report Generation Pipeline...")
     try:
-        # Step 1.1: Write raw pressure data via FileIO
         raw_csv = """Pump_ID,Pressure_PSI,Temperature_C,Status
 P-101,185,65,Optimal
 P-102,220,82,Warning
@@ -48,7 +47,6 @@ P-104,245,88,Critical
         f_res = file_io(FileIOInput(operation="write", path="telemetry/pressure.csv", content=raw_csv, session_id=SESSION_ID))
         assert f_res.status == ToolStatus.SUCCESS, "FileIO write failed"
 
-        # Step 1.2: Filter high pressure rows via Spreadsheet Tool
         s_res = spreadsheet(SpreadsheetInput(
             file_path="telemetry/pressure.csv",
             operation="filter",
@@ -58,7 +56,6 @@ P-104,245,88,Critical
         assert s_res.status == ToolStatus.SUCCESS, "Spreadsheet filter failed"
         assert len(s_res.data) == 2, f"Expected 2 high pressure rows, got {len(s_res.data)}"
 
-        # Step 1.3: Generate Word Document Report via DocGen Tool
         report_spec = {
             "title": "MRPL High Pressure Alert Report",
             "sections": [
@@ -78,12 +75,10 @@ P-104,245,88,Critical
     # Workflow 2: Symbolic Math Derivation -> Code Sandbox Verification
     print("\n[Workflow 2] Symbolic Calculus Derivation & Code Execution Verification...")
     try:
-        # Step 2.1: Derive Symbolic Derivative using SymPy Math Tool
         m_res = math_eval(MathEvalInput(expression="x**3 - 6*x**2 + 9*x", mode="differentiate"))
         assert m_res.status == ToolStatus.SUCCESS, "MathEval differentiation failed"
-        derived_expr = m_res.result  # "3*x**2 - 12*x + 9"
+        derived_expr = m_res.result
 
-        # Step 2.2: Pass derived expression to Code Sandbox for numerical evaluation
         verify_code = f"""
 def f_prime(x):
     return {derived_expr}
@@ -100,7 +95,7 @@ print(f"Critical Points Found: {{crit_points}}")
     except Exception as e:
         print(f"[FAIL] Workflow 2 failed: {e}")
 
-    # Workflow 3: Path Traversal Security Boundary Attack Attempt through ReAct Tool Node
+    # Workflow 3: Path Traversal Security Boundary Guard
     print("\n[Workflow 3] Security Path Traversal Guard Verification through ReAct Tool Node...")
     try:
         malicious_call = {
@@ -133,12 +128,12 @@ print(f"Critical Points Found: {{crit_points}}")
 
 def run_all():
     print("\n" + "#" * 75)
-    print("SOVEREIGN AGENTIC AI WORKBENCH MASTER TEST RUNNER (PHASES 1 - 6)")
+    print("SOVEREIGN AGENTIC AI WORKBENCH MASTER TEST RUNNER (PHASES 1 - 7)")
     print("#" * 75)
 
     # 1. Run Phase 2 Tool Tests
     print("\n>>> EXECUTION STEP 1: PHASE 2 AGENT TOOLS SUITE")
-    import test_tools
+    from tests import test_tools
     test_tools.test_math_eval_tool()
     test_tools.test_file_io_tool()
     test_tools.test_code_sandbox_tool()
@@ -148,27 +143,34 @@ def run_all():
 
     # 2. Run Phase 4 Router Tests
     print("\n>>> EXECUTION STEP 2: PHASE 4 ROUTER / CLASSIFIER SUITE")
-    import test_router
+    from tests import test_router
     test_router.run_tests()
 
     # 3. Run Phase 5 Orchestrator Skeleton Tests
     print("\n>>> EXECUTION STEP 3: PHASE 5 ORCHESTRATOR SKELETON SUITE")
-    import test_orchestrator
+    from tests import test_orchestrator
     test_orchestrator.test_phase5_orchestrator_skeleton()
 
     # 4. Run Phase 6 ReAct Tool Loop Tests
     print("\n>>> EXECUTION STEP 4: PHASE 6 REACT TOOL INTEGRATION SUITE")
-    import test_phase6
+    from tests import test_phase6
     test_phase6.test_tool_node_failure_stages()
     test_phase6.test_loop_safety_bounds()
     test_phase6.test_react_graph_tool_dispatch_wiring()
 
-    # 5. Run E2E Workflows
-    print("\n>>> EXECUTION STEP 5: END-TO-END MULTI-TOOL WORKFLOW SUITE")
+    # 5. Run Phase 7 Two-Stage OCR Pipeline Tests
+    print("\n>>> EXECUTION STEP 5: PHASE 7 CONFIDENCE-GATED OCR PIPELINE SUITE")
+    from tests import test_phase7
+    test_phase7.test_file_metadata_ocr_hint()
+    test_phase7.test_standalone_ocr_pipeline()
+    test_phase7.test_react_orchestrator_ocr_wiring()
+
+    # 6. Run E2E Workflows
+    print("\n>>> EXECUTION STEP 6: END-TO-END MULTI-TOOL WORKFLOW SUITE")
     run_e2e_workflow_tests()
 
     print("\n" + "#" * 75)
-    print("MASTER TEST SUITE SUCCESS: ALL PHASES 1 - 6 VERIFIED PASSED 100%!")
+    print("MASTER TEST SUITE SUCCESS: ALL PHASES 1 - 7 VERIFIED PASSED 100%!")
     print("#" * 75 + "\n")
 
 

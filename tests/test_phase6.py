@@ -1,6 +1,6 @@
 """
-test_phase6.py (SIH PS 26117)
-=============================
+tests/test_phase6.py (SIH PS 26117)
+===================================
 Phase 6 Test Suite for LangGraph ReAct Orchestrator Tool Integration.
 Verifies:
   1. Tool dispatch & ReAct loop execution (infer -> tool_node -> infer).
@@ -17,7 +17,8 @@ import os
 from uuid import uuid4
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 
 from tool_interface import ToolStatus, ToolResult
 from router.schemas import RouteDecision
