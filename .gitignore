@@ -12,6 +12,8 @@ ENV/
 # Workspaces, Local Databases & Developer Scratch
 workspace/
 ignore-files/
+reference_files/
+chroma_db/
 *.db
 *.log
 

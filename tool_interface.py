@@ -31,6 +31,7 @@ class ToolInput(BaseModel):
 class ToolResult(BaseModel):
     """Base Pydantic model for all tool outputs."""
     status: ToolStatus
+    data: Optional[Any] = None
     error: Optional[str] = None
     metadata: dict = Field(default_factory=dict)
 

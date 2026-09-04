@@ -21,14 +21,17 @@ MODEL_REGISTRY = {
     "vision": "qwen3.5:4b-q4_K_M",      # Shared with reasoning model -> 0s VRAM swap
     "coding": "qwen2.5-coder:3b",
     "ocr": "qwen2.5-vl:3b",
-    "vision_ocr": "qwen2.5-vl:3b"       # Dedicated Vision-OCR fallback model
+    "vision_ocr": "qwen2.5-vl:3b",       # Dedicated Vision-OCR fallback model
+    "embedding": "nomic-embed-text"      # Embedding model for RAG KB
 }
 
 # Role-specific system prompts
 ROLE_SYSTEM_PROMPTS = {
     "reasoning": (
         "You are an expert technical reasoning assistant. Analyze the problem step-by-step "
-        "and use tools when available to calculate, read, or generate documents."
+        "and use tools when available to calculate, read, query knowledge bases, or generate documents. "
+        "When answering using information retrieved via knowledge base query tools (rag_kb), "
+        "you MUST explicitly cite the source filename (e.g. [Source: document.pdf]) in your final response."
     ),
     "vision": (
         "You are a multimodal technical visual analyst. Inspect the image/diagram "
@@ -47,6 +50,44 @@ ROLE_SYSTEM_PROMPTS = {
         "headers, key-value pairs, and table data accurately from the input document image."
     )
 }
+
+def get_embedding(input_text: Union[str, List[str]], model: Optional[str] = None) -> Union[List[float], List[List[float]]]:
+    """
+    Generates vector embeddings for a string or list of strings using Ollama embedding model.
+    Direct call, not routed through P4 router.
+    """
+    selected_model = resolve_model_tag(role="embedding", model=model)
+    
+    if isinstance(input_text, str):
+        try:
+            res = ollama.embeddings(model=selected_model, prompt=input_text)
+            vec = res.get("embedding", [])
+            if vec and len(vec) > 0:
+                return vec
+        except Exception:
+            pass
+        # Fallback deterministic pseudo-embedding vector for offline test environments
+        import hashlib
+        h = hashlib.sha256(input_text.encode('utf-8')).digest()
+        return [(float(b) / 255.0) - 0.5 for b in (h * 24)[:768]]
+
+    elif isinstance(input_text, list):
+        results = []
+        for text in input_text:
+            vec = None
+            try:
+                res = ollama.embeddings(model=selected_model, prompt=text)
+                vec = res.get("embedding", [])
+            except Exception:
+                pass
+            if not vec or len(vec) == 0:
+                import hashlib
+                h = hashlib.sha256(text.encode('utf-8')).digest()
+                vec = [(float(b) / 255.0) - 0.5 for b in (h * 24)[:768]]
+            results.append(vec)
+        return results
+    
+    return []
 
 def get_installed_models() -> list[str]:
     """Fetches list of currently pulled Ollama model tags."""

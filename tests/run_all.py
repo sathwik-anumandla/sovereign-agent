@@ -165,12 +165,17 @@ def run_all():
     test_phase7.test_standalone_ocr_pipeline()
     test_phase7.test_react_orchestrator_ocr_wiring()
 
-    # 6. Run E2E Workflows
-    print("\n>>> EXECUTION STEP 6: END-TO-END MULTI-TOOL WORKFLOW SUITE")
+    # 6. Run Phase 8 RAG Knowledge Base Tests
+    print("\n>>> EXECUTION STEP 6: PHASE 8 RAG KNOWLEDGE BASE SUITE")
+    from tests import test_phase8
+    test_phase8.run_tests()
+
+    # 7. Run E2E Workflows
+    print("\n>>> EXECUTION STEP 7: END-TO-END MULTI-TOOL WORKFLOW SUITE")
     run_e2e_workflow_tests()
 
     print("\n" + "#" * 75)
-    print("MASTER TEST SUITE SUCCESS: ALL PHASES 1 - 7 VERIFIED PASSED 100%!")
+    print("MASTER TEST SUITE SUCCESS: ALL PHASES 1 - 8 VERIFIED PASSED 100%!")
     print("#" * 75 + "\n")
 
 

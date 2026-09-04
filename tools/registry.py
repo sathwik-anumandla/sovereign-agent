@@ -14,6 +14,7 @@ from tools.code_sandbox import code_sandbox, CodeSandboxInput
 from tools.spreadsheet import spreadsheet, SpreadsheetInput
 from tools.doc_gen import doc_gen, DocGenInput
 from tools.ocr_vlm import ocr_vlm, OCRVLMInput
+from tools.rag_kb import rag_kb, RagKbInput
 
 # Tool Function Registry
 TOOL_REGISTRY: Dict[str, Callable[[Any], ToolResult]] = {
@@ -23,6 +24,7 @@ TOOL_REGISTRY: Dict[str, Callable[[Any], ToolResult]] = {
     "spreadsheet": spreadsheet,
     "doc_gen": doc_gen,
     "ocr_vlm": ocr_vlm,
+    "rag_kb": rag_kb,
 }
 
 # Tool Input Class Registry for Pydantic coercion & validation
@@ -33,6 +35,7 @@ TOOL_INPUT_TYPES: Dict[str, Type[ToolInput]] = {
     "spreadsheet": SpreadsheetInput,
     "doc_gen": DocGenInput,
     "ocr_vlm": OCRVLMInput,
+    "rag_kb": RagKbInput,
 }
 
 
