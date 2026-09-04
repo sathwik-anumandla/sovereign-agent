@@ -105,7 +105,7 @@ def test_phase5_orchestrator_skeleton():
     # Test Case 7: Database Thread List & Process Persistence
     print("\n[Test 7] Verifying SQLite Checkpoint Database Persistence...")
     assert Path(DB_FILENAME).exists(), f"Database '{DB_FILENAME}' must exist on disk"
-    recent_threads = list_recent_thread_ids(10)
+    recent_threads = list_recent_thread_ids(100)
     print(f"Recent SQLite Thread IDs ({len(recent_threads)} found):")
     for tid in recent_threads[:5]:
         print(f"  - {tid}")

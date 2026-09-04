@@ -3,7 +3,7 @@ inspect_run.py (SIH PS 26117)
 =============================
 Standalone thread inspector helper script.
 Inspects persistent SQLite checkpoint history for any given thread_id.
-Pretty-prints checkpoint snapshots, node transitions, state values, and step timestamps.
+Pretty-prints checkpoint snapshots, node transitions, tool calls, tool results, and iteration counts.
 """
 
 import sys
@@ -21,7 +21,6 @@ def list_recent_thread_ids(limit: int = 10) -> list[str]:
     try:
         conn = sqlite3.connect(DB_FILENAME)
         cursor = conn.cursor()
-        # Query distinct thread_ids from checkpoints table
         cursor.execute("SELECT DISTINCT thread_id FROM checkpoints ORDER BY checkpoint_id DESC LIMIT ?", (limit,))
         rows = cursor.fetchall()
         conn.close()
@@ -32,9 +31,9 @@ def list_recent_thread_ids(limit: int = 10) -> list[str]:
 
 def inspect_thread(thread_id: str):
     """Prints full checkpoint history for a specified thread_id."""
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 75)
     print(f"INSPECTING ORCHESTRATOR THREAD ID: {thread_id}")
-    print("=" * 70)
+    print("=" * 75)
 
     if not Path(DB_FILENAME).exists():
         print(f"Error: Checkpoint database '{DB_FILENAME}' not found.")
@@ -63,12 +62,34 @@ def inspect_thread(thread_id: str):
         
         if "prompt" in values:
             print(f"Prompt           : '{values.get('prompt')}'")
+
         if "route_decision" in values and values.get("route_decision"):
             rd = values.get("route_decision")
             role = getattr(rd, "role", None) or (rd.get("role") if isinstance(rd, dict) else "N/A")
             method = getattr(rd, "method", None) or (rd.get("method") if isinstance(rd, dict) else "N/A")
             conf = getattr(rd, "confidence", None) or (rd.get("confidence") if isinstance(rd, dict) else "N/A")
             print(f"Route Decision   : Role='{role}', Method='{method}', Confidence={conf}")
+
+        if "tool_iteration_count" in values:
+            print(f"Iteration Count  : {values.get('tool_iteration_count')} / {values.get('max_tool_iterations', 5)}")
+
+        if "tool_calls" in values and values.get("tool_calls"):
+            calls = values.get("tool_calls")
+            print(f"Pending Tool Calls ({len(calls)}):")
+            for c in calls:
+                func_name = c.get("function", {}).get("name") if isinstance(c, dict) else getattr(c, "name", "N/A")
+                print(f"  - Tool: '{func_name}'")
+
+        if "tool_results" in values and values.get("tool_results"):
+            results = values.get("tool_results")
+            print(f"Executed Tool Results ({len(results)} total):")
+            for r in results[-2:]:  # Print last 2 results preview
+                status = getattr(r, "status", None) or (r.get("status") if isinstance(r, dict) else "N/A")
+                err = getattr(r, "error", None) or (r.get("error") if isinstance(r, dict) else None)
+                meta = getattr(r, "metadata", {}) or (r.get("metadata") if isinstance(r, dict) else {})
+                fail_type = meta.get("failure_type", "none")
+                print(f"  - Status={status}, FailureType={fail_type}, Error={err}")
+
         if "response" in values and values.get("response"):
             resp = str(values.get("response")).strip()
             preview = resp[:120] + "..." if len(resp) > 120 else resp
@@ -76,7 +97,7 @@ def inspect_thread(thread_id: str):
             
         print()
 
-    print("=" * 70 + "\n")
+    print("=" * 75 + "\n")
 
 
 if __name__ == "__main__":
