@@ -25,21 +25,43 @@ MODEL_REGISTRY = {
     "embedding": "nomic-embed-text"      # Embedding model for RAG KB
 }
 
+# Role -> Context Window Size (tokens) Registry
+ROLE_CONTEXT_WINDOWS = {
+    "reasoning": 8192,
+    "vision": 8192,
+    "coding": 8192,
+    "ocr": 8192,
+    "vision_ocr": 8192
+}
+
 # Role-specific system prompts
 ROLE_SYSTEM_PROMPTS = {
     "reasoning": (
         "You are an expert technical reasoning assistant. Analyze the problem step-by-step "
         "and use tools when available to calculate, read, query knowledge bases, or generate documents. "
         "When answering using information retrieved via knowledge base query tools (rag_kb), "
-        "you MUST explicitly cite the source filename (e.g. [Source: document.pdf]) in your final response."
+        "you MUST explicitly cite the source filename (e.g. [Source: document.pdf]) in your final response.\n\n"
+        "TOOL USE DISCIPLINE:\n"
+        "Only call a tool when the task genuinely requires it:\n"
+        "- Use `rag_kb` only when the question needs grounding in ingested reference documents (e.g. company-specific standards, uploaded reports, internal procedures) — not for general domain knowledge you already know.\n"
+        "- Use `code_sandbox` only when code must actually be written and executed.\n"
+        "- Use `ocr_vlm` only when a scanned/structured document image is present in this request.\n"
+        "- If an image has already been provided to you directly in this conversation (i.e. you can see it as part of your input), do NOT call `ocr_vlm` or any other tool to \"retrieve\" it — you already have it. Only call `ocr_vlm` when you need to extract structured text from a scanned document that has NOT already been shown to you visually.\n"
+        "- Use `math_eval` only for calculations you cannot reliably do directly.\n"
+        "- Use `file_io` only when reading/writing/listing files is explicitly needed.\n\n"
+        "If a question can be answered directly from your own knowledge, answer directly without calling any tool. Do not call a tool \"just in case\" — each unnecessary tool call adds latency and noise to the audit trail."
     ),
     "vision": (
         "You are a multimodal technical visual analyst. Inspect the image/diagram "
         "and describe key components, labels, and measurements accurately."
     ),
     "coding": (
-        "You are an expert Python software engineer. Output clean, self-contained, executable Python code "
-        "or execute tools to perform calculations and data operations."
+        "You are an expert Python software engineer. Execute Python code via the `code_sandbox` tool "
+        "to perform calculations, process data files, and solve tasks.\n\n"
+        "TOOL USE DISCIPLINE:\n"
+        "Only call a tool when the task genuinely requires it:\n"
+        "- Use `code_sandbox` when Python code needs to be executed.\n"
+        "- If an input file is specified in the prompt or workspace context (e.g. `sensor_logs.csv`), it is already staged in your working execution directory — open it directly with a relative file path inside `code_sandbox` without needing extra `file_io` calls."
     ),
     "ocr": (
         "You are an expert document OCR transcription model. Accurately transcribe all printed "
@@ -146,16 +168,27 @@ def run_inference_raw(
     model: str = None,
     role: str = "reasoning",
     tools: Optional[List[Dict[str, Any]]] = None,
-    keep_alive: str = "5m"
+    keep_alive: str = "5m",
+    images: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Executes a raw Ollama chat completion returning the full message dict (content, tool_calls).
+    Supports optional images attachment for multimodal models.
     """
     selected_model = resolve_model_tag(role=role, model=model)
+    num_ctx = ROLE_CONTEXT_WINDOWS.get(role.lower().strip(), 8192)
     options = {
-        "temperature": 0.7 if role == "reasoning" else 0.2
+        "temperature": 0.7 if role == "reasoning" else 0.2,
+        "num_ctx": num_ctx
     }
     
+    if images:
+        messages = [dict(m) for m in messages]
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                msg["images"] = images
+                break
+
     kwargs = {
         "model": selected_model,
         "messages": messages,
@@ -209,8 +242,10 @@ def run_inference(
     if effective_images:
         messages[1]["images"] = effective_images
     
+    num_ctx = ROLE_CONTEXT_WINDOWS.get(role.lower().strip(), 8192)
     options = {
-        "temperature": 0.7 if (thinking or role == "reasoning") else 0.2
+        "temperature": 0.7 if (thinking or role == "reasoning") else 0.2,
+        "num_ctx": num_ctx
     }
 
     if stream:

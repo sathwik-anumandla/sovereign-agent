@@ -12,17 +12,20 @@ An on-premise, air-gapped, zero-cloud AI agent workbench designed for confidenti
 
 ---
 
-## Key Features
+## Key Features & Architecture Enhancements
 
 * **100% Air-Gapped Sovereignty**: Zero external API dependencies, running locally on Apple Silicon Metal GPU / CUDA.
 * **Abstract Multi-Model Role Registry**: Decouples agent tasks into model roles (`reasoning` using `qwen3.5:4b-q4_K_M`, `coding` using `qwen2.5-coder:3b`, `vision`, `ocr`, `embedding` using `nomic-embed-text`) with dynamic tag resolution and `keep_alive="5m"` VRAM caching.
-* **3-Stage Waterfall Router (Phase 2 & 4)**:
-  1. *Stage 1 (Metadata)*: Code extension inspection guard (`.py`, `.ipynb`, `.js`, etc. -- `conf=1.00`) and OCR auto-detection (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.tiff`, `.bmp`, `.webp`).
-  2. *Stage 2 (Keyword)*: Word-boundary precision heuristic (~35 intent terms -- `conf=0.85`).
-  3. *Stage 3 (Classifier)*: Offline TF-IDF + Logistic Regression ML classifier for ambiguous prompts.
-* **ReAct LangGraph Orchestrator Loop (Phase 5 & 6)**:
-  * End-to-end execution pipeline (`START -> route -> infer -> (conditional) -> tool_node -> infer -> ... -> END`).
-  * Ollama native function calling with dynamically generated Pydantic tool schemas (`OLLAMA_TOOL_SCHEMAS`).
+* **Scaled Context Window (P9 Amendment)**: Enforces `num_ctx = 8192` across Ollama API calls to support large visual token payloads and extensive prompt histories.
+* **4-Stage Waterfall Router (Phase 2 & 4 & 9)**:
+  1. *Stage 0 (Multimodal Image Override)*: Instantly routes image attachments (`.jpg`, `.jpeg`, `.png`, `.webp`, `.bmp`, `.tiff`) to `role="reasoning"`, `confidence=1.00`, `method="multimodal_override"`.
+  2. *Stage 1 (Metadata)*: Code extension inspection guard (`.py`, `.ipynb`, `.js`, etc. -- `conf=1.00`) and OCR auto-detection (`.pdf`, `.png`, `.jpg`, etc.).
+  3. *Stage 2 (Keyword)*: Word-boundary precision heuristic (~35 intent terms -- `conf=0.85`).
+  4. *Stage 3 (Classifier)*: Offline TF-IDF + Logistic Regression ML classifier for ambiguous prompts.
+* **ReAct LangGraph Orchestrator Loop (Phase 5, 6 & 9)**:
+  * End-to-end execution topology (`START -> route -> infer -> (conditional) -> tool_node -> infer -> ... -> END`).
+  * **Dual Tool Call Support**: Handles native Ollama tool-calling JSON payloads AND provides a robust regex/brace JSON fallback parser (`parse_json_tool_call` with `strict=False`, multiline string handling, and trailing comma cleanup) for models like `qwen2.5-coder:3b`.
+  * **Session Workspace File-Staging**: Audited pre-execution step copying input files from host paths into `./workspace/<session_id>/` via `file_io` write prior to `code_sandbox` execution.
   * Single `tool_node` dispatcher handling 3 failure stages:
     * Stage 1: Unknown tool name (`failure_type="unknown_tool"`)
     * Stage 2: Malformed tool arguments (`failure_type="invalid_args"`)
@@ -50,7 +53,7 @@ An on-premise, air-gapped, zero-cloud AI agent workbench designed for confidenti
   * `file_io`: Workspace-bounded file operations (`/workspace/<session_id>/`) with path traversal guards and zero file deletion.
   * `code_sandbox`: Isolated Python code execution sandbox with hard timeout guards, plot capture, and execution timing.
   * `spreadsheet`: Pandas & OpenPyXL tabular data analysis layer (`filter`, `aggregate`, `compute`).
-  * `doc_gen`: Deliverable generator producing formatted Word (`.docx`), PowerPoint (`.pptx`), and Excel (`.xlsx`) documents from shared content primitives.
+  * `doc_gen`: Deliverable generator producing formatted Word (`.docx`), PowerPoint (`.pptx`), and Excel (`.xlsx`) documents with automatic LLM argument normalization (`output_format` $\rightarrow$ `format`, `docx_spec` $\rightarrow$ `spec`).
   * `ocr_vlm`: Confidence-gated layout analysis, text recognition, PDF page rendering, and VLM fallback.
   * `rag_kb`: Document retrieval and knowledge base ingestion/deletion management.
 
@@ -59,23 +62,28 @@ An on-premise, air-gapped, zero-cloud AI agent workbench designed for confidenti
 ## Project Architecture & Directory Structure
 
 ```text
-sovereign-agent/
+agent/
 ├── README.md                      # Comprehensive Architecture & Setup Guide
-├── .gitignore                     # Git ignore rules for Python, local workspace & logs
-├── phase1_inference.py            # Local Ollama Inference SDK, Role Registry, Embeddings & Tool Calling
+├── .gitignore                     # Git ignore rules for Python, local workspace, DBs & logs
+├── cli.py                         # Interactive Terminal CLI & Workbench Command Runner
+├── phase1_inference.py            # Ollama SDK, Role Registry (num_ctx=8192), Embeddings & Inference
 ├── tool_interface.py              # Base Pydantic models, @audited_tool decorator, & Path Validator
-├── train_router_classifier.py     # Offline ML training script for Stage 3 Router Classifier
 ├── inspect_run.py                 # Standalone thread checkpoint history inspector
+├── train_router_classifier.py     # Offline ML training script for Stage 3 Router Classifier
 ├── router_vectorizer.pkl          # Trained TF-IDF Vectorizer artifact
 ├── router_classifier.pkl          # Trained Logistic Regression Classifier artifact
-├── chroma_db/                     # Persistent ChromaDB vector database directory
-├── reference_files/               # Ingested source reference document disk storage
 │
-├── tests/                         # Dedicated Test Suite Package
+├── test_code_prompt.py            # Flow 2 Harness: Pandas anomaly analysis in sandbox
+├── test_text_prompt.py            # Flow 3 Harness: Direct vision & image reasoning
+├── test_flow1_approval_note.py    # Flow 1 Harness: Scanned PDF -> OCR -> RAG -> DocGen (.docx)
+├── test_flow1_thorough.py         # Flow 1 Thorough Suite: 4 multi-scenario PDF & AST audits
+├── test_flow4_approval_note.py    # Flow 4 Harness: Full approval workflow suite
+│
+├── tests/                         # Master Test Suite Package
 │   ├── __init__.py
 │   ├── run_all.py                 # Master integration test runner across all phases (1-8)
 │   ├── test_tools.py              # Standalone test suite for agent tools
-│   ├── test_router.py             # Standalone test suite for 3-stage waterfall router
+│   ├── test_router.py             # Standalone test suite for 4-stage waterfall router
 │   ├── test_orchestrator.py       # Standalone test suite for LangGraph orchestrator
 │   ├── test_phase6.py             # Standalone test suite for Phase 6 ReAct tool loop
 │   ├── test_phase7.py             # Standalone test suite for Phase 7 confidence-gated OCR
@@ -95,17 +103,17 @@ sovereign-agent/
 │   ├── file_io.py                 # Scoped workspace file I/O (read/write/list)
 │   ├── code_sandbox.py            # Isolated Python sandbox execution jail
 │   ├── spreadsheet.py             # Data analysis layer (pandas/openpyxl)
-│   ├── doc_gen.py                 # Word (.docx), PPT (.pptx), Excel (.xlsx) generator
+│   ├── doc_gen.py                 # Word (.docx), PPT (.pptx), Excel (.xlsx) generator with LLM normalization
 │   ├── ocr_vlm.py                 # Confidence-gated OCR, PDF rendering & VLM fallback
 │   └── rag_kb.py                  # RAG Knowledge Base vector search & ingestion pipeline
 │
-└── router/                        # Phase 2 & 4 Router Package
+└── router/                        # Phase 2 & 4 & 9 Router Package
     ├── __init__.py
     ├── schemas.py                 # FileMetadata, RouteDecision models
     ├── metadata_check.py          # Stage 1: Extension matching & OCR auto-detection
     ├── keyword_check.py           # Stage 2: Intent keyword matching
     ├── classifier.py              # Stage 3: ML model inference
-    └── route.py                   # 3-Stage Waterfall Entrypoint
+    └── route.py                   # 4-Stage Waterfall Entrypoint (Stage 0 Multimodal Override)
 ```
 
 ---
@@ -131,52 +139,62 @@ pip install pydantic sympy pandas openpyxl python-docx python-pptx opencv-python
 
 ---
 
-## Running Test Suites & Inspection Helpers
+## Interacting with the Workbench CLI
 
-### Run Master Integration Test Runner (Phases 1 - 8 + E2E Workflows)
+Make sure Ollama is running in a separate terminal:
+```bash
+ollama serve
+```
+
+### Option A: Interactive Chat Shell
+```bash
+python3 cli.py
+```
+
+### Option B: Direct Prompt Command
+```bash
+python3 cli.py "What is 15 * 24?"
+```
+
+### Option C: Attach a File to the Prompt
+```bash
+python3 cli.py --file /path/to/document.pdf "Summarize this file and extract key table metrics."
+```
+
+---
+
+## Running Integration Flow Harnesses & Test Suites
+
+### 1. Run Flow 1 Thorough Multi-Scenario Suite
+```bash
+PYTHONUNBUFFERED=1 python3 test_flow1_thorough.py
+```
+
+### 2. Run Flow 1 Approval Note Harness
+```bash
+PYTHONUNBUFFERED=1 python3 test_flow1_approval_note.py
+```
+
+### 3. Run Flow 2 Coding Sandbox Harness
+```bash
+PYTHONUNBUFFERED=1 python3 test_code_prompt.py
+```
+
+### 4. Run Flow 3 Vision Reasoning Harness
+```bash
+PYTHONUNBUFFERED=1 python3 test_text_prompt.py
+```
+
+### 5. Run Master Integration Test Runner (Phases 1 - 8)
 ```bash
 python3 tests/run_all.py
 ```
 
-### Run Phase 8 RAG Knowledge Base Tests
+### 6. Inspect Persistent Checkpoint Thread History
 ```bash
-python3 tests/test_phase8.py
-```
-
-### Run Phase 7 Confidence-Gated OCR Tests
-```bash
-python3 tests/test_phase7.py
-```
-
-### Run OCR Validation on User Test PDFs
-```bash
-python3 tests/test_ocr_user_files.py
-```
-
-### Run Phase 6 ReAct Tool Integration Tests
-```bash
-python3 tests/test_phase6.py
-```
-
-### Run LangGraph Orchestrator Skeleton Tests (Phase 5)
-```bash
-python3 tests/test_orchestrator.py
-```
-
-### Run 3-Stage Waterfall Router Tests (Phase 4)
-```bash
-python3 tests/test_router.py
-```
-
-### Run Agent Tool Layer Tests (Phase 2)
-```bash
-python3 tests/test_tools.py
-```
-
-### Inspect Persistent Checkpoint Thread History
-```bash
-# Inspect most recent thread or specific thread ID
+# Inspect specific thread ID or list recent threads
 python3 inspect_run.py <thread_id>
+python3 inspect_run.py --list
 ```
 
 ---

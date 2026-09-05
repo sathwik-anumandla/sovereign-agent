@@ -15,6 +15,9 @@ from router.keyword_check import check_keywords
 from router.classifier import classify
 
 
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
+
+
 def route(prompt: str, file_metadata: Optional[List[FileMetadata]] = None) -> RouteDecision:
     """
     Decides whether a request should be handled by 'reasoning' or 'coding' model role.
@@ -26,6 +29,19 @@ def route(prompt: str, file_metadata: Optional[List[FileMetadata]] = None) -> Ro
     Returns:
         RouteDecision (role, confidence, method)
     """
+    # Stage 0: Multimodal Image Override Check (hard constraint for attached images)
+    if file_metadata:
+        for meta in file_metadata:
+            ext = meta.extension.strip().lower()
+            if not ext.startswith("."):
+                ext = f".{ext}"
+            if ext in IMAGE_EXTENSIONS:
+                return RouteDecision(
+                    role="reasoning",
+                    confidence=1.0,
+                    method="multimodal_override"
+                )
+
     # Stage 1: Metadata Check
     decision = check_metadata(file_metadata)
     if decision:

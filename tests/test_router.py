@@ -14,6 +14,10 @@ sys.path.insert(0, ROOT_DIR)
 from router import route, FileMetadata
 
 TEST_CASES = [
+    # Stage 0: Multimodal Image Overrides
+    ("Analyze this image for issues", [FileMetadata(filename="chart.png", extension=".png")], "reasoning", "multimodal_override"),
+    ("What is shown in this screenshot?", [FileMetadata(filename="ui.jpeg", extension=".jpeg")], "reasoning", "multimodal_override"),
+
     # Stage 1: Metadata Hits
     ("Please inspect this script for bugs", [FileMetadata(filename="pipeline.py", extension=".py")], "coding", "metadata"),
     ("Can you review this notebook?", [FileMetadata(filename="data_analysis.ipynb", extension=".ipynb")], "coding", "metadata"),

@@ -15,13 +15,16 @@ from orchestrator import build_orchestrator_graph, DB_FILENAME
 
 
 def list_recent_thread_ids(limit: int = 10) -> list[str]:
-    """Queries SQLite checkpoints table for recent thread IDs."""
+    """Queries SQLite checkpoints table for recent thread IDs. Pass limit <= 0 to fetch all."""
     if not Path(DB_FILENAME).exists():
         return []
     try:
         conn = sqlite3.connect(DB_FILENAME)
         cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT thread_id FROM checkpoints ORDER BY checkpoint_id DESC LIMIT ?", (limit,))
+        if limit > 0:
+            cursor.execute("SELECT DISTINCT thread_id FROM checkpoints ORDER BY checkpoint_id DESC LIMIT ?", (limit,))
+        else:
+            cursor.execute("SELECT DISTINCT thread_id FROM checkpoints ORDER BY checkpoint_id DESC")
         rows = cursor.fetchall()
         conn.close()
         return [r[0] for r in rows]

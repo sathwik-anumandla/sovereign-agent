@@ -6,9 +6,10 @@ Uses format-agnostic content primitives (TextBlock, TableBlock, ImageBlock, Char
 composed into format-specific specs (DocxSpec, PptxSpec, XlsxSpec).
 """
 
+import re
 from pathlib import Path
 from typing import Union, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import docx
 from docx.shared import Inches, Pt, RGBColor
 from pptx import Presentation
@@ -70,10 +71,43 @@ class XlsxSpec(BaseModel):
 # --- Tool Input & Result Models ---
 
 class DocGenInput(ToolInput):
-    format: str  # "docx" | "pptx" | "xlsx"
-    spec: dict
-    output_path: str
-    session_id: str
+    format: str = Field(default="docx", description="Document format: 'docx', 'pptx', or 'xlsx'")
+    spec: dict = Field(default_factory=dict, description="Document specification dictionary")
+    output_path: str = Field(default="approval_note.docx", description="Output document filename or relative path")
+    session_id: str = Field(default="workbench_session", description="Session workspace identifier")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # 1. Normalize format / output_format / word format alias
+            if "format" not in data and "output_format" in data:
+                data["format"] = data.pop("output_format")
+            if data.get("format") in ("word", "doc", "document"):
+                data["format"] = "docx"
+
+            # 2. Normalize spec from docx_spec / pptx_spec / xlsx_spec / sections
+            if "spec" not in data or not data["spec"]:
+                for alt_key in ("docx_spec", "pptx_spec", "xlsx_spec", "sections"):
+                    if alt_key in data:
+                        alt_val = data.get(alt_key)
+                        if alt_key == "sections" and isinstance(alt_val, list):
+                            data["spec"] = {"title": "Generated Document", "sections": alt_val}
+                        else:
+                            data["spec"] = alt_val
+                        break
+
+            # 3. Default output_path if missing or empty
+            if not data.get("output_path"):
+                spec_dict = data.get("spec", {})
+                title = spec_dict.get("title") if isinstance(spec_dict, dict) else None
+                fmt = data.get("format", "docx")
+                if title and isinstance(title, str) and title.strip():
+                    clean_title = re.sub(r'[^\w\s-]', '', title).strip()
+                    data["output_path"] = f"{clean_title}.{fmt}"
+                else:
+                    data["output_path"] = f"approval_note.{fmt}"
+        return data
 
 
 class DocGenResult(ToolResult):

@@ -7,8 +7,10 @@ Persistent Checkpointing: SqliteSaver ('workbench_checkpoints.db').
 """
 
 import os
+import re
 import json
 import sqlite3
+from pathlib import Path
 from uuid import uuid4
 from typing import Optional, List, Dict, Any, Tuple
 from pydantic import ValidationError
@@ -32,8 +34,18 @@ def route_node(state: WorkbenchState) -> dict:
     role = decision.role if decision else "reasoning"
     sys_prompt = ROLE_SYSTEM_PROMPTS.get(role, ROLE_SYSTEM_PROMPTS["reasoning"])
 
+    # Provide workspace relative file path instructions when input files are present
+    workspace_context = ""
+    if state.file_metadata:
+        staged_files = [f"'{fm.filename}'" for fm in state.file_metadata]
+        if staged_files:
+            workspace_context = (
+                f"\n\n[Workspace Context]: The file(s) {', '.join(staged_files)} are available in your execution working directory. "
+                f"When writing or executing code in code_sandbox, open these files using relative file paths (e.g. {staged_files[0]}), NOT absolute host paths."
+            )
+
     initial_messages = [
-        {"role": "system", "content": sys_prompt},
+        {"role": "system", "content": sys_prompt + workspace_context},
         {"role": "user", "content": state.prompt}
     ]
 
@@ -43,8 +55,61 @@ def route_node(state: WorkbenchState) -> dict:
     }
 
 
+IMAGE_FILE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
+
+
+def parse_json_tool_call(content: str) -> Optional[Dict[str, Any]]:
+    """
+    Fallback parser for models (e.g. qwen2.5-coder) that emit JSON tool calls in text content
+    rather than native Ollama tool_calls payloads.
+    Strips markdown code fences, parses JSON, and validates against TOOL_REGISTRY keys.
+    """
+    if not content or not content.strip():
+        return None
+
+    text = content.strip()
+
+    # Match inner content inside ```json ... ``` or ``` ... ```
+    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    candidate = fence_match.group(1).strip() if fence_match else text
+
+    # Locate outermost curly braces for valid JSON object
+    start_idx = candidate.find("{")
+    end_idx = candidate.rfind("}")
+
+    if start_idx == -1 or end_idx == -1 or end_idx <= start_idx:
+        return None
+
+    json_str = candidate[start_idx : end_idx + 1]
+
+    try:
+        data = json.loads(json_str, strict=False)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        try:
+            # Trailing comma cleanup
+            cleaned = re.sub(r",\s*([\}\]])", r"\1", json_str)
+            data = json.loads(cleaned, strict=False)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return None
+
+    if isinstance(data, dict):
+        name = data.get("name")
+        arguments = data.get("arguments") or data.get("args") or {}
+
+        if name and isinstance(name, str) and name in TOOL_REGISTRY:
+            return {
+                "id": f"fallback_call_{str(uuid4())[:8]}",
+                "function": {
+                    "name": name,
+                    "arguments": arguments if isinstance(arguments, dict) else {},
+                },
+            }
+
+    return None
+
+
 def infer_node(state: WorkbenchState) -> dict:
-    """Node 2: Runs Ollama inference with function tool schemas."""
+    """Node 2: Runs Ollama inference with function tool schemas and image support."""
     rd = state.route_decision
     if isinstance(rd, dict):
         role = rd.get("role", "reasoning")
@@ -55,20 +120,41 @@ def infer_node(state: WorkbenchState) -> dict:
 
     model_tag = MODEL_REGISTRY.get(role, MODEL_REGISTRY["reasoning"])
     
-    # Execute inference with message history & tool schemas
+    # Extension-based check for image files in state.file_metadata
+    # Only pass images on the first infer_node call of an invocation (tool_iteration_count == 0)
+    images = None
+    if state.tool_iteration_count == 0 and state.file_metadata:
+        for fm in state.file_metadata:
+            ext = fm.extension.strip().lower()
+            if not ext.startswith("."):
+                ext = f".{ext}"
+            if ext in IMAGE_FILE_EXTENSIONS:
+                img_path = getattr(fm, "filepath", None) or fm.filename
+                images = [img_path]
+                break
+
+    # Execute inference with message history, tool schemas, and optional images
     msg_dict = run_inference_raw(
         messages=state.messages,
         role=role,
         model=model_tag,
-        tools=OLLAMA_TOOL_SCHEMAS
+        tools=OLLAMA_TOOL_SCHEMAS,
+        images=images
     )
 
-    updated_messages = list(state.messages) + [msg_dict]
-    
     # Extract tool_calls if present in assistant response
     raw_calls = msg_dict.get("tool_calls", []) or []
-
     content = msg_dict.get("content", "")
+
+    # Fallback: if native tool_calls is empty, attempt JSON fallback parsing from content
+    if not raw_calls and content:
+        fallback_call = parse_json_tool_call(content)
+        if fallback_call:
+            raw_calls = [fallback_call]
+            msg_dict = dict(msg_dict)
+            msg_dict["tool_calls"] = raw_calls
+
+    updated_messages = list(state.messages) + [msg_dict]
 
     return {
         "messages": updated_messages,
@@ -149,6 +235,29 @@ def tool_node(state: WorkbenchState) -> dict:
             # Stage 3: Tool Execution Failure Check
             if validated_input is not None:
                 try:
+                    # File-staging step for code execution: stage input files into session workspace via audited file_io write
+                    if tool_name == "code_sandbox" and state.file_metadata:
+                        for fm in state.file_metadata:
+                            src_path_str = getattr(fm, "filepath", None) or getattr(fm, "path", None) or fm.filename
+                            src_path = Path(src_path_str)
+                            if src_path.exists() and src_path.is_file():
+                                try:
+                                    with open(src_path, "r", encoding="utf-8", errors="ignore") as f:
+                                        file_content = f.read()
+                                    file_io_tool = TOOL_REGISTRY.get("file_io")
+                                    file_io_cls = TOOL_INPUT_TYPES.get("file_io")
+                                    if file_io_tool and file_io_cls:
+                                        stage_in = file_io_cls(
+                                            operation="write",
+                                            path=fm.filename,
+                                            content=file_content,
+                                            session_id=session_id
+                                        )
+                                        stage_res = file_io_tool(stage_in)
+                                        accumulated_results.append(stage_res)
+                                except Exception:
+                                    pass
+
                     tool_func = TOOL_REGISTRY[tool_name]
                     tool_result = tool_func(validated_input)
                 except Exception as ex:
