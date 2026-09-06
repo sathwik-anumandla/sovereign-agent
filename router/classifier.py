@@ -30,10 +30,14 @@ def _load_models():
             _classifier = pickle.load(f)
 
 
+CONFIDENCE_THRESHOLD = 0.60
+
+
 def classify(prompt: str) -> RouteDecision:
     """
     Stage 3 Waterfall fallback.
     Uses TF-IDF + Logistic Regression to classify ambiguous prompts.
+    Falls back to 'reasoning' role if confidence < CONFIDENCE_THRESHOLD.
     """
     _load_models()
     
@@ -48,8 +52,13 @@ def classify(prompt: str) -> RouteDecision:
     predicted_role = str(classes[max_idx])
     confidence = float(probs[max_idx])
 
+    method = "classifier"
+    # If confidence is below threshold, default ambiguous requests to reasoning role
+    if predicted_role == "coding" and confidence < CONFIDENCE_THRESHOLD:
+        predicted_role = "reasoning"
+
     return RouteDecision(
         role=predicted_role,
         confidence=round(confidence, 2),
-        method="classifier"
+        method=method
     )

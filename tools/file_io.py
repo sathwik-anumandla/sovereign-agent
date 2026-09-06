@@ -6,6 +6,7 @@ within /workspace/<session_id>/. Deletion is explicitly prohibited for security 
 """
 
 import os
+from pathlib import Path
 from typing import Optional
 from pydantic import Field
 from tool_interface import ToolInput, ToolResult, ToolStatus, audited_tool, validate_workspace_path
@@ -46,6 +47,18 @@ def file_io(input: FileIOInput) -> FileIOResult:
         )
 
     if op == "read":
+        if not validated_path.exists() or not validated_path.is_file():
+            # Fallback search project root for file matching filename
+            root_dir = Path(__file__).parent.parent
+            found = list(root_dir.rglob(Path(input.path).name))
+            if found and found[0].exists():
+                try:
+                    import shutil
+                    validated_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(found[0], validated_path)
+                except Exception:
+                    pass
+
         if not validated_path.exists() or not validated_path.is_file():
             return FileIOResult(
                 status=ToolStatus.ERROR,

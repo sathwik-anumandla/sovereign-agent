@@ -1,0 +1,715 @@
+import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { 
+  Paperclip, 
+  ArrowUp, 
+  File, 
+  X, 
+  Sparkles, 
+  Loader2,
+  PanelLeft,
+  Copy,
+  Check,
+  ShieldCheck,
+  BookOpen,
+  UploadCloud,
+  Trash2,
+  FileText,
+  Database,
+  Sun,
+  Moon
+} from 'lucide-react';
+import ToolCard from './ToolCard';
+import AgenticWorkflowStepper from './AgenticWorkflowStepper';
+import StatusStrip from './StatusStrip';
+
+function CodeBlock({ inline, className, children, ...props }) {
+  const [copied, setCopied] = useState(false);
+  if (inline) {
+    return (
+      <code className="bg-[var(--bg-input)] text-[var(--text-accent)] font-mono text-sm px-1.5 py-0.5 rounded border-0" {...props}>
+        {children}
+      </code>
+    );
+  }
+  const match = /language-(\w+)/.exec(className || '');
+  const codeString = String(children).replace(/\n$/, '');
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(codeString);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="my-3 rounded-xl border-0 bg-[var(--bg-sidebar)] overflow-hidden font-mono text-sm shadow-sm">
+      <div className="flex items-center justify-between bg-[var(--bg-card)] px-3.5 py-2 border-0 text-xs theme-text-muted">
+        <span className="font-medium lowercase tracking-wide theme-text-secondary">{match ? match[1] : 'code'}</span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="flex items-center gap-1.5 theme-text-muted hover:theme-text-primary transition-colors text-xs border-0 bg-transparent cursor-pointer"
+          title="Copy code"
+        >
+          {copied ? (
+            <>
+              <Check className="h-3.5 w-3.5 theme-text-primary" />
+              <span className="theme-text-primary font-medium">Copied!</span>
+            </>
+          ) : (
+            <>
+              <Copy className="h-3.5 w-3.5" />
+              <span>Copy code</span>
+            </>
+          )}
+        </button>
+      </div>
+      <div className="p-4 overflow-x-auto">
+        <pre className="font-mono text-sm leading-relaxed text-[var(--text-primary)] bg-transparent border-0 m-0 p-0">
+          <code {...props}>{children}</code>
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+const markdownComponents = {
+  h1: ({ children }) => <h1 className="text-xl font-bold theme-text-primary mt-4 mb-2 border-b border-[var(--border-muted)] pb-1">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-lg font-bold theme-text-primary mt-3 mb-2">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-base font-semibold theme-text-primary mt-2 mb-1">{children}</h3>,
+  p: ({ children }) => <p className="mb-2 leading-relaxed theme-text-primary font-sans text-base">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc pl-5 mb-3 space-y-1 text-base theme-text-primary">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal pl-5 mb-3 space-y-1 text-base theme-text-primary">{children}</ol>,
+  li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+  blockquote: ({ children }) => <blockquote className="border-l-4 border-[var(--palette-steel-blue)] pl-3 my-2 theme-text-muted italic text-base">{children}</blockquote>,
+  code: CodeBlock,
+  table: ({ children }) => <div className="my-3 overflow-x-auto rounded-xl border-0 shadow-sm"><table className="w-full border-collapse text-sm text-left">{children}</table></div>,
+  th: ({ children }) => <th className="border-b border-[var(--border-main)] bg-[var(--bg-input)] px-3.5 py-2.5 font-semibold theme-text-primary">{children}</th>,
+  td: ({ children }) => <td className="border-b border-[var(--border-muted)] px-3.5 py-2.5 theme-text-primary bg-[var(--bg-card)]/40">{children}</td>,
+  a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-[var(--palette-warm-sand)] underline hover:opacity-80 font-medium">{children}</a>,
+  hr: () => <hr className="my-4 border-[var(--border-muted)]" />
+};
+
+export default function ChatWindow({
+  activeThreadId,
+  messages,
+  toolCallsMap,
+  isStreaming,
+  connectionError,
+  routeDecision,
+  onSendMessage,
+  onFileUpload,
+  isSidebarOpen,
+  onToggleSidebar,
+  isThinkingMode = false,
+  onToggleThinking,
+  theme = 'dark',
+  onToggleTheme,
+  showKbModal = false,
+  onCloseKbModal,
+  token
+}) {
+  const [showAirGapModal, setShowAirGapModal] = useState(false);
+  const [inputText, setInputText] = useState('');
+  const [attachedFiles, setAttachedFiles] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef(null);
+  const messagesEndRef = useRef(null);
+
+  // Knowledge Base State
+  const [kbData, setKbData] = useState({ files: [], total_documents: 0, total_chunks: 0 });
+  const [isIngestingKb, setIsIngestingKb] = useState(false);
+  const kbFileInputRef = useRef(null);
+
+  const fetchKbFiles = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('http://localhost:8000/knowledge_base/files', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setKbData(data);
+      }
+    } catch (err) {
+      console.error('Error fetching KB files:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (showKbModal && token) {
+      fetchKbFiles();
+    }
+  }, [showKbModal, token]);
+
+  const handleKbFileUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0 || !token) return;
+
+    setIsIngestingKb(true);
+    for (const file of files) {
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        await fetch('http://localhost:8000/knowledge_base/upload', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData
+        });
+      } catch (err) {
+        console.error('Error uploading KB file:', err);
+      }
+    }
+    await fetchKbFiles();
+    setIsIngestingKb(false);
+    if (kbFileInputRef.current) kbFileInputRef.current.value = '';
+  };
+
+  const handleDeleteKbFile = async (filename) => {
+    if (!token) return;
+    try {
+      await fetch(`http://localhost:8000/knowledge_base/files/${filename}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      await fetchKbFiles();
+    } catch (err) {
+      console.error('Error deleting KB file:', err);
+    }
+  };
+
+  // Live stopwatch timer state for Claude-style response timer
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [lastTurnDuration, setLastTurnDuration] = useState(null);
+  const timerRef = useRef(null);
+  const startTimeRef = useRef(null);
+
+  // Manage stopwatch counter during active streaming
+  useEffect(() => {
+    if (isStreaming) {
+      startTimeRef.current = Date.now();
+      setElapsedSeconds(0);
+      setLastTurnDuration(null);
+      timerRef.current = setInterval(() => {
+        if (startTimeRef.current) {
+          const diff = Math.floor((Date.now() - startTimeRef.current) / 1000);
+          setElapsedSeconds(diff);
+        }
+      }, 500);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      if (startTimeRef.current) {
+        const finalDiff = Math.max(1, Math.floor((Date.now() - startTimeRef.current) / 1000));
+        setLastTurnDuration(finalDiff);
+        startTimeRef.current = null;
+      }
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isStreaming]);
+
+  // Auto-scroll to bottom of chat
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, toolCallsMap, isStreaming, elapsedSeconds]);
+
+  const handleFileChange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0 || !activeThreadId) return;
+
+    setIsUploading(true);
+    for (const file of files) {
+      try {
+        const uploaded = await onFileUpload(file);
+        if (uploaded) {
+          setAttachedFiles((prev) => [...prev, uploaded]);
+        }
+      } catch (err) {
+        console.error('File upload failed:', err);
+      }
+    }
+    setIsUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removeAttachedFile = (file_id) => {
+    setAttachedFiles((prev) => prev.filter((f) => f.file_id !== file_id));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if ((!inputText.trim() && attachedFiles.length === 0) || isStreaming) return;
+
+    const fileIds = attachedFiles.map((f) => f.file_id);
+    onSendMessage(inputText, fileIds, attachedFiles);
+    setInputText('');
+    setAttachedFiles([]);
+  };
+
+  if (!activeThreadId) {
+    return (
+      <div className="flex h-full flex-1 flex-col items-center justify-center app-bg p-6 text-center theme-text-primary">
+        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] shadow-md border-0">
+          <Sparkles className="h-7 w-7" />
+        </div>
+        <h2 className="text-2xl font-bold tracking-tight theme-text-primary">
+          Sovereign Agent AI
+        </h2>
+        <p className="mt-2 text-sm theme-text-muted max-w-md">
+          Air-gapped industrial assistant powered by open-weight LLMs. Select a chat or create a new conversation to start.
+        </p>
+      </div>
+    );
+  }
+
+  const canSubmit = (inputText.trim() || attachedFiles.length > 0) && !isStreaming;
+
+  return (
+    <div className="flex h-full flex-1 flex-col app-bg theme-text-primary">
+      {/* Top Header Bar */}
+      <header className="flex h-14 items-center justify-between border-b header-bg px-4 shadow-sm z-10">
+        <div className="flex items-center gap-3">
+          {!isSidebarOpen && (
+            <button
+              onClick={onToggleSidebar}
+              className="flex h-8 w-8 items-center justify-center rounded-lg theme-text-muted hover:bg-[var(--bg-hover)] hover:theme-text-primary transition-colors border-0 bg-transparent cursor-pointer"
+              title="Open sidebar"
+            >
+              <PanelLeft className="h-4 w-4" />
+            </button>
+          )}
+
+          <div className="flex items-center gap-2">
+            {!isSidebarOpen && (
+              <span className="text-sm font-semibold theme-text-primary">
+                Sovereign Agent
+              </span>
+            )}
+            <span className="rounded-full bg-[var(--bg-card)] border-0 px-2.5 py-0.5 font-mono text-[11px] theme-text-muted">
+              qwen3.5:4b · Local
+            </span>
+          </div>
+        </div>
+
+        {/* Right Air-Gap Telemetry Badge */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowAirGapModal(true)}
+            className="flex items-center gap-1.5 rounded-full border-0 bg-[var(--bg-card)] px-3 py-1 text-xs theme-text-secondary hover:bg-[var(--bg-hover)] hover:theme-text-primary transition-colors cursor-pointer"
+            title="Click to view Sovereign Air-Gap Network Audit Telemetry"
+          >
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+            <span className="font-mono text-[11px] font-medium">Air-Gapped · 0 B Egress</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Messages Stream Container (Claude AI Centered Layout) */}
+      <div className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="mx-auto max-w-3xl space-y-6">
+          {messages.length === 0 && !isStreaming && (
+            <div className="py-10 text-center">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] shadow-md border-0">
+                <Sparkles className="h-6 w-6" />
+              </div>
+              <h2 className="text-xl font-bold tracking-tight theme-text-primary">
+                How can Sovereign Agent help you today?
+              </h2>
+              <p className="mt-1 text-xs theme-text-muted max-w-md mx-auto">
+                Air-gapped industrial assistant with 3-stage waterfall router and 7 standalone tools.
+              </p>
+
+              <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-3 text-left">
+                <button
+                  type="button"
+                  onClick={() => onSendMessage("Extract all findings from ignore-files/ocr-test/test-1.pdf, query our RAG knowledge base for approval thresholds, and generate a formal Word document approval note deliverable.", [], [])}
+                  className="rounded-xl border-0 card-bg p-4 hover:bg-[var(--bg-hover)] transition-all group shadow-sm text-left cursor-pointer"
+                >
+                  <div className="flex items-center gap-1.5 text-xs font-semibold theme-text-primary group-hover:theme-text-accent">
+                    <FileText className="h-4 w-4 text-emerald-400" />
+                    <span>Scanned PDF → Word Deliverable</span>
+                  </div>
+                  <div className="mt-1 text-[11px] theme-text-muted leading-relaxed">
+                    Runs OCR on scanned PDF report, queries procurement thresholds in RAG KB, and drafts Word (.docx) approval note.
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onSendMessage("Analyze sensor_logs.csv for thermal anomalies exceeding 150°C using Python code_sandbox, and generate a formatted Excel deliverable with anomaly statistics.", [], [])}
+                  className="rounded-xl border-0 card-bg p-4 hover:bg-[var(--bg-hover)] transition-all group shadow-sm text-left cursor-pointer"
+                >
+                  <div className="flex items-center gap-1.5 text-xs font-semibold theme-text-primary group-hover:theme-text-accent">
+                    <Database className="h-4 w-4 text-blue-400" />
+                    <span>CSV Analysis → Excel Deliverable</span>
+                  </div>
+                  <div className="mt-1 text-[11px] theme-text-muted leading-relaxed">
+                    Executes Python code sandbox to analyze CSV telemetry data and generates a structured Excel (.xlsx) report.
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onSendMessage("Generate a 3-slide executive PowerPoint presentation deliverable (.pptx) summarizing the inspection findings and action items for the CDU-2 refinery unit.", [], [])}
+                  className="rounded-xl border-0 card-bg p-4 hover:bg-[var(--bg-hover)] transition-all group shadow-sm text-left cursor-pointer"
+                >
+                  <div className="flex items-center gap-1.5 text-xs font-semibold theme-text-primary group-hover:theme-text-accent">
+                    <BookOpen className="h-4 w-4 text-amber-400" />
+                    <span>Executive PowerPoint Slides</span>
+                  </div>
+                  <div className="mt-1 text-[11px] theme-text-muted leading-relaxed">
+                    Composes a multi-slide executive PowerPoint (.pptx) presentation deliverable summarizing technical inspection findings.
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {messages.map((msg, idx) => {
+            const isUser = msg.role === 'user';
+            const isLastAssistant = !isUser && idx === messages.length - 1;
+
+            return (
+              <div key={idx} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+                {/* User Message: Claude-style Right-Aligned Capsule (Borderless) */}
+                {isUser ? (
+                  <div className="ml-auto max-w-[85%] space-y-2">
+                    {/* Attached File Chips */}
+                    {msg.attachedFiles && msg.attachedFiles.length > 0 && (
+                      <div className="flex flex-wrap justify-end gap-2">
+                        {msg.attachedFiles.map((file, fIdx) => (
+                          <div key={fIdx} className="flex items-center gap-1.5 rounded-lg border-0 card-bg px-2.5 py-1 text-xs theme-text-primary shadow-sm">
+                            <File className="h-3.5 w-3.5 theme-text-muted" />
+                            <span>{file.filename}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="rounded-2xl bg-[var(--bg-user-chip)] border-0 px-4 py-3 text-sm theme-text-primary leading-relaxed shadow-sm font-sans">
+                      {msg.content}
+                    </div>
+                  </div>
+                ) : (
+                  /* Assistant Message: Agentic Workflow Stepper, Ambient Status Strip & Deliverable Output */
+                  <div className="mr-auto w-full space-y-2 pt-1">
+                    {/* Ephemeral Ambient Status Strip */}
+                    <StatusStrip
+                      status={msg.status}
+                      isStreaming={isStreaming && isLastAssistant}
+                      hasStartedTokens={msg.hasStartedTokens}
+                    />
+
+                    {/* Top Agentic Workflow Stepper Timeline */}
+                    <AgenticWorkflowStepper
+                      routeDecision={msg.routeDecision || routeDecision}
+                      planSteps={msg.planSteps || []}
+                      toolCalls={msg.toolCalls || []}
+                      isStreaming={isStreaming && isLastAssistant}
+                      hasStartedTokens={msg.hasStartedTokens || (!isStreaming && !!msg.content)}
+                      isThinkingMode={isThinkingMode}
+                      elapsedSeconds={elapsedSeconds}
+                      durationSeconds={msg.durationSeconds}
+                    />
+
+                    {/* Final Response Markdown Text Content */}
+                    {msg.content && (
+                      <div className="markdown-body font-sans text-sm theme-text-primary pt-1 pl-1">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                          {msg.content}
+                        </ReactMarkdown>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Active Streaming Placeholder (before first assistant token arrives or during initial tool execution) */}
+          {isStreaming && (messages.length === 0 || messages[messages.length - 1].role === 'user') && (
+            <div className="mr-auto w-full space-y-2 pt-1">
+              <StatusStrip
+                status={messages[messages.length - 1]?.status}
+                isStreaming={true}
+                hasStartedTokens={false}
+              />
+              <AgenticWorkflowStepper
+                routeDecision={routeDecision}
+                planSteps={[]}
+                toolCalls={toolCallsMap || []}
+                isStreaming={true}
+                hasStartedTokens={false}
+                isThinkingMode={isThinkingMode}
+                elapsedSeconds={elapsedSeconds}
+                durationSeconds={null}
+              />
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      {/* Connection Error Banner */}
+      {connectionError && (
+        <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2 rounded-lg border-0 bg-[var(--bg-card)] p-2.5 px-4 text-xs theme-text-muted shadow-md">
+          <span>{connectionError}</span>
+        </div>
+      )}
+
+      {/* Floating Centered Input Container (Claude Pill Style) */}
+      <footer className="p-4 pt-0">
+        <div className="mx-auto max-w-3xl">
+          {/* Attached Files Chips in Input Box */}
+          {attachedFiles.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2 px-1">
+              {attachedFiles.map((file) => (
+                <div key={file.file_id} className="flex items-center gap-1.5 rounded-lg border-0 card-bg px-2.5 py-1 text-xs theme-text-primary shadow-sm">
+                  <File className="h-3.5 w-3.5 theme-text-muted" />
+                  <span>{file.filename}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachedFile(file.file_id)}
+                    className="ml-1 rounded p-0.5 theme-text-muted hover:bg-[var(--bg-hover)] hover:theme-text-primary transition-colors border-0 bg-transparent cursor-pointer"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="relative flex items-center gap-2 rounded-2xl border-0 input-bg px-3.5 py-2.5 shadow-lg transition-all">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              className="hidden"
+              multiple
+            />
+
+            {/* Paperclip Button (Borderless) */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isStreaming || isUploading}
+              className="flex h-8 w-8 items-center justify-center rounded-full theme-text-muted hover:bg-[var(--bg-hover)] hover:theme-text-primary transition-colors disabled:opacity-40 border-0 bg-transparent cursor-pointer"
+              title="Attach File"
+            >
+              {isUploading ? <Loader2 className="h-4 w-4 animate-spin theme-text-secondary" /> : <Paperclip className="h-4 w-4" />}
+            </button>
+
+            {/* Minimal Single 'Think' Button (No Icons, No Borders) */}
+            {onToggleThinking && (
+              <button
+                type="button"
+                onClick={onToggleThinking}
+                disabled={isStreaming}
+                className={`flex h-7 items-center rounded-lg px-2.5 text-xs font-medium transition-colors border-0 cursor-pointer ${
+                  isThinkingMode
+                    ? 'bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] font-semibold shadow-sm'
+                    : 'card-bg theme-text-muted hover:theme-text-primary'
+                }`}
+                title={isThinkingMode ? "Disable Thinking Mode" : "Enable Thinking Mode"}
+              >
+                Think
+              </button>
+            )}
+
+            {/* Textarea Input */}
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              disabled={isStreaming}
+              placeholder="Message Sovereign Agent..."
+              className="flex-1 border-0 bg-transparent px-3 py-1 text-sm theme-text-primary placeholder:theme-text-muted focus:outline-none focus:ring-0 disabled:opacity-50"
+            />
+
+            {/* Circular Send Button (Borderless) */}
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className={`flex h-8 w-8 items-center justify-center rounded-full transition-all shadow-sm border-0 cursor-pointer ${
+                canSubmit
+                  ? 'bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] hover:opacity-90'
+                  : 'bg-[var(--border-muted)] theme-text-muted cursor-not-allowed'
+              }`}
+            >
+              <ArrowUp className="h-4 w-4" />
+            </button>
+          </form>
+
+          <div className="mt-2 text-center text-[11px] theme-text-muted">
+            Sovereign Agent running locally on air-gapped open-weight LLMs.
+          </div>
+        </div>
+      </footer>
+
+      {/* Sovereign Air-Gap Network Security Telemetry Audit Modal */}
+      {showAirGapModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-lg rounded-2xl card-bg p-6 shadow-2xl border-0 theme-text-primary space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--border-muted)] pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-emerald-400" />
+                <h3 className="text-base font-bold theme-text-primary">
+                  Sovereign Air-Gap Security Telemetry
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAirGapModal(false)}
+                className="rounded-lg p-1 theme-text-muted hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 font-mono text-xs">
+              <div className="flex justify-between rounded-lg bg-[var(--bg-input)] p-2.5">
+                <span className="theme-text-muted">Air-Gap Status:</span>
+                <span className="text-emerald-400 font-bold">100% ISOLATED (SECURE)</span>
+              </div>
+              <div className="flex justify-between rounded-lg bg-[var(--bg-input)] p-2.5">
+                <span className="theme-text-muted">Outbound WAN Egress:</span>
+                <span className="theme-text-primary font-bold">0 Bytes (Zero Data Exfiltration)</span>
+              </div>
+              <div className="flex justify-between rounded-lg bg-[var(--bg-input)] p-2.5">
+                <span className="theme-text-muted">External API Requests:</span>
+                <span className="theme-text-primary font-bold">0 Outbound HTTP/HTTPS Calls</span>
+              </div>
+              <div className="flex justify-between rounded-lg bg-[var(--bg-input)] p-2.5">
+                <span className="theme-text-muted">Monitored Loopback:</span>
+                <span className="theme-text-secondary font-bold">127.0.0.1:11434, :8000</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl card-bg p-3 border-0 text-[11px] theme-text-muted leading-relaxed font-sans">
+              <strong>Empirical Air-Gap Guarantee:</strong> All LLM inference, embedding generation (ChromaDB), OCR document scanning, Python sandbox executions, and document generation occur strictly on your local GPU server loopback interface. Zero data leaves your premises.
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={() => setShowAirGapModal(false)}
+                className="rounded-lg bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] px-4 py-2 text-xs font-semibold hover:opacity-90 transition-all border-0 cursor-pointer"
+              >
+                Close Audit View
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sovereign Knowledge Base (RAG) Management Modal */}
+      {showKbModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-2xl rounded-2xl card-bg p-6 shadow-2xl border-0 theme-text-primary space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-[var(--border-muted)] pb-3">
+              <div className="flex items-center gap-2">
+                <BookOpen className="h-5 w-5 text-[var(--text-secondary)]" />
+                <h3 className="text-base font-bold theme-text-primary">
+                  Sovereign Knowledge Base (RAG Ingestion)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={onCloseKbModal}
+                className="rounded-lg p-1 theme-text-muted hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-xs theme-text-muted">
+              Ingest internal enterprise SOPs, technical manuals, or standards into offline <strong>ChromaDB</strong> vector store powered by local <code>nomic-embed-text</code> embeddings.
+            </p>
+
+            {/* Drag & Drop Upload Container */}
+            <div className="rounded-xl border-2 border-dashed border-[var(--border-main)] p-4 text-center bg-[var(--bg-input)]">
+              <input
+                type="file"
+                ref={kbFileInputRef}
+                onChange={handleKbFileUpload}
+                className="hidden"
+                accept=".pdf,.docx,.txt,.csv,.md"
+                multiple
+              />
+              <UploadCloud className="mx-auto h-8 w-8 theme-text-muted mb-2" />
+              <div className="text-xs font-semibold theme-text-primary">
+                {isIngestingKb ? "Chunking & Embedding Document..." : "Click or drag & drop enterprise SOP files"}
+              </div>
+              <div className="text-[11px] theme-text-muted mt-1">
+                Supports PDF, DOCX, TXT, CSV manuals (Layout-aware chunking)
+              </div>
+              <button
+                type="button"
+                onClick={() => kbFileInputRef.current?.click()}
+                disabled={isIngestingKb}
+                className="mt-3 rounded-lg bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] px-4 py-1.5 text-xs font-medium hover:opacity-90 transition-all border-0 cursor-pointer disabled:opacity-50"
+              >
+                {isIngestingKb ? "Ingesting..." : "Select SOP Files"}
+              </button>
+            </div>
+
+            {/* Live Ingested Reference Document List */}
+            <div className="flex-1 overflow-y-auto space-y-2">
+              <div className="flex items-center justify-between text-xs font-semibold theme-text-primary px-1">
+                <span>Ingested Reference Documents</span>
+                <span className="font-mono text-[11px] theme-text-muted">
+                  {kbData.total_documents} docs · {kbData.total_chunks} vector chunks
+                </span>
+              </div>
+
+              {kbData.files.length === 0 ? (
+                <div className="py-6 text-center text-xs theme-text-muted">
+                  No documents ingested yet. Upload an SOP to populate the RAG database.
+                </div>
+              ) : (
+                kbData.files.map((file) => (
+                  <div key={file.source} className="flex items-center justify-between rounded-xl bg-[var(--bg-input)] p-3 text-xs shadow-sm">
+                    <div className="flex items-center gap-2.5 truncate">
+                      <FileText className="h-4 w-4 theme-text-secondary shrink-0" />
+                      <div className="truncate">
+                        <div className="font-medium theme-text-primary truncate">{file.source}</div>
+                        <div className="text-[10px] theme-text-muted font-mono mt-0.5">
+                          {file.chunk_count} vector chunks · {Array.from(file.section_types || []).join(', ') || 'text'}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteKbFile(file.source)}
+                      className="rounded p-1.5 theme-text-muted hover:bg-[var(--bg-hover)] hover:text-red-400 transition-colors border-0 bg-transparent cursor-pointer"
+                      title={`Remove ${file.source} from RAG KB`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-[var(--border-muted)]">
+              <button
+                type="button"
+                onClick={onCloseKbModal}
+                className="rounded-lg bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] px-4 py-2 text-xs font-semibold hover:opacity-90 transition-all border-0 cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

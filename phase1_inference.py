@@ -43,25 +43,25 @@ ROLE_SYSTEM_PROMPTS = {
         "you MUST explicitly cite the source filename (e.g. [Source: document.pdf]) in your final response.\n\n"
         "TOOL USE DISCIPLINE:\n"
         "Only call a tool when the task genuinely requires it:\n"
-        "- Use `rag_kb` only when the question needs grounding in ingested reference documents (e.g. company-specific standards, uploaded reports, internal procedures) — not for general domain knowledge you already know.\n"
+        "- Use `rag_kb` only when the question needs grounding in ingested reference documents — not for general domain knowledge.\n"
         "- Use `code_sandbox` only when code must actually be written and executed.\n"
         "- Use `ocr_vlm` only when a scanned/structured document image is present in this request.\n"
-        "- If an image has already been provided to you directly in this conversation (i.e. you can see it as part of your input), do NOT call `ocr_vlm` or any other tool to \"retrieve\" it — you already have it. Only call `ocr_vlm` when you need to extract structured text from a scanned document that has NOT already been shown to you visually.\n"
         "- Use `math_eval` only for calculations you cannot reliably do directly.\n"
         "- Use `file_io` only when reading/writing/listing files is explicitly needed.\n\n"
-        "If a question can be answered directly from your own knowledge, answer directly without calling any tool. Do not call a tool \"just in case\" — each unnecessary tool call adds latency and noise to the audit trail."
+        "IMPORTANT: For general questions (recipes, explanations, general knowledge, conversational prompts), answer DIRECTLY in natural markdown text. Do NOT call any tools or output JSON tool calls."
     ),
     "vision": (
         "You are a multimodal technical visual analyst. Inspect the image/diagram "
         "and describe key components, labels, and measurements accurately."
     ),
     "coding": (
-        "You are an expert Python software engineer. Execute Python code via the `code_sandbox` tool "
-        "to perform calculations, process data files, and solve tasks.\n\n"
+        "You are an expert software engineer and technical assistant.\n"
+        "When asked to write, explain, or debug code, output markdown code blocks (```python ... ```) directly.\n"
+        "IMPORTANT: If the user prompt is a general non-programming question (e.g. recipes, cooking instructions, general explanations), answer directly in standard Markdown text. Do NOT format non-coding text as Python code or wrap recipes inside ```python code blocks.\n\n"
         "TOOL USE DISCIPLINE:\n"
-        "Only call a tool when the task genuinely requires it:\n"
-        "- Use `code_sandbox` when Python code needs to be executed.\n"
-        "- If an input file is specified in the prompt or workspace context (e.g. `sensor_logs.csv`), it is already staged in your working execution directory — open it directly with a relative file path inside `code_sandbox` without needing extra `file_io` calls."
+        "Only call a tool when code execution or file operations are explicitly required:\n"
+        "- Use `code_sandbox` when Python code must be executed to compute a result or process data.\n"
+        "- For non-code questions, recipes, explanations, or general knowledge, answer directly in markdown text without calling tools."
     ),
     "ocr": (
         "You are an expert document OCR transcription model. Accurately transcribe all printed "
@@ -169,16 +169,17 @@ def run_inference_raw(
     role: str = "reasoning",
     tools: Optional[List[Dict[str, Any]]] = None,
     keep_alive: str = "5m",
-    images: Optional[List[str]] = None
+    images: Optional[List[str]] = None,
+    thinking: bool = True
 ) -> Dict[str, Any]:
     """
     Executes a raw Ollama chat completion returning the full message dict (content, tool_calls).
-    Supports optional images attachment for multimodal models.
+    Supports optional images attachment for multimodal models and thinking suppression.
     """
     selected_model = resolve_model_tag(role=role, model=model)
     num_ctx = ROLE_CONTEXT_WINDOWS.get(role.lower().strip(), 8192)
     options = {
-        "temperature": 0.7 if role == "reasoning" else 0.2,
+        "temperature": 0.7 if (thinking and role == "reasoning") else 0.1,
         "num_ctx": num_ctx
     }
     
@@ -202,11 +203,16 @@ def run_inference_raw(
         res = ollama.chat(**kwargs)
         msg = res.get("message", {})
         if hasattr(msg, "model_dump"):
-            return msg.model_dump()
+            res_dict = msg.model_dump()
         elif isinstance(msg, dict):
-            return msg
+            res_dict = msg
         else:
-            return {"role": "assistant", "content": str(msg)}
+            res_dict = {"role": "assistant", "content": str(msg)}
+
+        if not thinking and res_dict.get("content"):
+            res_dict["content"] = strip_thinking_block(res_dict["content"])
+
+        return res_dict
     except Exception as e:
         return {"role": "assistant", "content": f"[Inference Error: {e}]"}
 
@@ -231,7 +237,7 @@ def run_inference(
     if thinking and role == "reasoning":
         system_prompt = f"{base_sys_prompt} Step-by-step thinking inside <think>...</think> is enabled."
     else:
-        system_prompt = f"{base_sys_prompt} Provide direct, concise output."
+        system_prompt = f"{base_sys_prompt} IMPORTANT: Provide a direct, concise response immediately. Do NOT output any <think>...</think> reasoning tags or internal thinking traces."
 
     messages = [
         {"role": "system", "content": system_prompt},

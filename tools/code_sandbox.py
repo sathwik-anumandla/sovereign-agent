@@ -71,6 +71,21 @@ def _run_in_docker(code: str, session_workspace: Path, timeout_s: int) -> Tuple[
 def _run_in_subprocess(code: str, session_workspace: Path, timeout_s: int) -> Tuple[str, str, int, list[str]]:
     """Isolated subprocess execution fallback."""
     session_workspace.mkdir(parents=True, exist_ok=True)
+    
+    # Auto-stage: Search for data files referenced in code (e.g. 'sensor_logs.csv') from project root if missing in session_workspace
+    import re, shutil
+    file_refs = re.findall(r"['\"]([^'\"]+\.(?:csv|txt|json|xlsx|png|pdf))['\"]", code)
+    root_dir = Path(__file__).parent.parent
+    for f_name in file_refs:
+        target_f = session_workspace / Path(f_name).name
+        if not target_f.exists():
+            matches = list(root_dir.rglob(Path(f_name).name))
+            if matches:
+                try:
+                    shutil.copy2(matches[0], target_f)
+                except Exception:
+                    pass
+
     script_path = session_workspace / f"_temp_script_{int(time.time()*1000)}.py"
     
     initial_files = set(f.name for f in session_workspace.iterdir()) if session_workspace.exists() else set()

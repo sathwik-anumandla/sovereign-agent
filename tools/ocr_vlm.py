@@ -78,14 +78,25 @@ def ocr_vlm(input_data: OCRVLMInput) -> ToolResult:
     try:
         session_id = input_data.session_id or "default_session"
         
-        # Check if direct path exists, otherwise validate relative workspace path
-        if Path(input_data.file_path).exists():
-            abs_path = Path(input_data.file_path).resolve()
+        # Robust multi-stage path resolver
+        candidate_path = Path(input_data.file_path)
+        if candidate_path.exists():
+            abs_path = candidate_path.resolve()
         else:
             try:
-                abs_path = validate_workspace_path(input_data.file_path, session_id)
+                ws_path = validate_workspace_path(candidate_path.name, session_id)
+                if ws_path.exists():
+                    abs_path = ws_path
+                else:
+                    # Search project directory for file matching name
+                    root_dir = Path(__file__).parent.parent
+                    found = list(root_dir.rglob(candidate_path.name))
+                    if found:
+                        abs_path = found[0].resolve()
+                    else:
+                        abs_path = ws_path
             except Exception:
-                abs_path = Path(input_data.file_path).resolve()
+                abs_path = candidate_path.resolve()
 
         if not abs_path.exists():
             return ToolResult(

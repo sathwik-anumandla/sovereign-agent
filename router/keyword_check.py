@@ -43,7 +43,19 @@ def check_keywords(prompt: str) -> Optional[RouteDecision]:
 
     prompt_lower = prompt.lower()
 
+    # Pure language names
+    LANGUAGE_NAMES = {"python", "javascript", "java", "typescript", "sql", "bash script", "shell script"}
+    CONCEPTUAL_WORDS = {"what", "why", "how", "explain", "compare", "list", "describe", "summarize", "advantage", "advantages", "disadvantage", "disadvantages"}
+    ACTION_VERBS = {"write", "script", "code", "fix", "debug", "run", "execute", "create", "implement", "build", "refactor", "test", "optimize", "def", "class", "import"}
+
+    is_conceptual = any(word in prompt_lower for word in CONCEPTUAL_WORDS)
+    has_action = any(verb in prompt_lower for verb in ACTION_VERBS)
+
     for kw in CODING_KEYWORDS:
+        # If it's just a language name in a conceptual query without action verbs, skip forcing coding role
+        if kw in LANGUAGE_NAMES and is_conceptual and not has_action:
+            continue
+
         # Check literal match if contains punctuation/spaces (e.g. "def ", "```", "function(")
         if any(char in kw for char in [" ", "(", "`", "."]):
             if kw in prompt_lower:

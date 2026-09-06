@@ -1,14 +1,19 @@
 """
 orchestrator/graph.py (SIH PS 26117)
 ====================================
-Phase 6 LangGraph ReAct Orchestrator Loop with Tool Calling.
-Topology: START -> route_node -> infer_node -> (should_continue) -> tool_node -> infer_node -> ... -> END
-Persistent Checkpointing: SqliteSaver ('workbench_checkpoints.db').
+ReAct LangGraph Orchestrator Loop with Tool Execution & SQLite Checkpoint Persistence.
+
+Topology:
+  START -> route_node -> infer_node -> (should_continue) -> tool_node -> infer_node -> ... -> END
+
+Persistent State Storage:
+  SqliteSaver ('workbench_checkpoints.db')
 """
 
 import os
 import re
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 from uuid import uuid4
@@ -20,63 +25,33 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from router.route import route
 from router.schemas import FileMetadata, RouteDecision
 from phase1_inference import run_inference_raw, MODEL_REGISTRY, ROLE_SYSTEM_PROMPTS
-from tool_interface import ToolStatus, ToolResult
+from tool_interface import ToolStatus, ToolResult, validate_workspace_path
 from tools.registry import TOOL_REGISTRY, TOOL_INPUT_TYPES, OLLAMA_TOOL_SCHEMAS
 from orchestrator.state import WorkbenchState
 
 DB_FILENAME = "workbench_checkpoints.db"
-
-
-def route_node(state: WorkbenchState) -> dict:
-    """Node 1: Evaluates 3-stage router and initializes message history."""
-    decision = route(state.prompt, state.file_metadata)
-    
-    role = decision.role if decision else "reasoning"
-    sys_prompt = ROLE_SYSTEM_PROMPTS.get(role, ROLE_SYSTEM_PROMPTS["reasoning"])
-
-    # Provide workspace relative file path instructions when input files are present
-    workspace_context = ""
-    if state.file_metadata:
-        staged_files = [f"'{fm.filename}'" for fm in state.file_metadata]
-        if staged_files:
-            workspace_context = (
-                f"\n\n[Workspace Context]: The file(s) {', '.join(staged_files)} are available in your execution working directory. "
-                f"When writing or executing code in code_sandbox, open these files using relative file paths (e.g. {staged_files[0]}), NOT absolute host paths."
-            )
-
-    initial_messages = [
-        {"role": "system", "content": sys_prompt + workspace_context},
-        {"role": "user", "content": state.prompt}
-    ]
-
-    return {
-        "route_decision": decision,
-        "messages": initial_messages
-    }
-
-
 IMAGE_FILE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
 
 
+# ============================================================================
+# HELPER UTILITIES & FALLBACK PARSERS
+# ============================================================================
+
 def parse_json_tool_call(content: str) -> Optional[Dict[str, Any]]:
     """
-    Fallback parser for models (e.g. qwen2.5-coder) that emit JSON tool calls in text content
-    rather than native Ollama tool_calls payloads.
-    Strips markdown code fences, parses JSON, and validates against TOOL_REGISTRY keys.
+    Fallback parser for models (e.g. qwen2.5-coder) that output JSON tool calls
+    in text content rather than native Ollama tool_calls payloads.
+    Strips markdown code fences, parses JSON, and validates against TOOL_REGISTRY.
     """
     if not content or not content.strip():
         return None
 
     text = content.strip()
-
-    # Match inner content inside ```json ... ``` or ``` ... ```
     fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
     candidate = fence_match.group(1).strip() if fence_match else text
 
-    # Locate outermost curly braces for valid JSON object
     start_idx = candidate.find("{")
     end_idx = candidate.rfind("}")
-
     if start_idx == -1 or end_idx == -1 or end_idx <= start_idx:
         return None
 
@@ -86,7 +61,6 @@ def parse_json_tool_call(content: str) -> Optional[Dict[str, Any]]:
         data = json.loads(json_str, strict=False)
     except (json.JSONDecodeError, ValueError, TypeError):
         try:
-            # Trailing comma cleanup
             cleaned = re.sub(r",\s*([\}\]])", r"\1", json_str)
             data = json.loads(cleaned, strict=False)
         except (json.JSONDecodeError, ValueError, TypeError):
@@ -95,7 +69,6 @@ def parse_json_tool_call(content: str) -> Optional[Dict[str, Any]]:
     if isinstance(data, dict):
         name = data.get("name")
         arguments = data.get("arguments") or data.get("args") or {}
-
         if name and isinstance(name, str) and name in TOOL_REGISTRY:
             return {
                 "id": f"fallback_call_{str(uuid4())[:8]}",
@@ -108,8 +81,119 @@ def parse_json_tool_call(content: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def detect_pseudo_json_tool_call(content: str) -> Optional[str]:
+    """Returns function name if content contains a pseudo-JSON object with an un-registered function name."""
+    if not content or not content.strip():
+        return None
+    text = content.strip()
+    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    candidate = fence_match.group(1).strip() if fence_match else text
+    start_idx = candidate.find("{")
+    end_idx = candidate.rfind("}")
+    if start_idx == -1 or end_idx == -1 or end_idx <= start_idx:
+        return None
+    try:
+        data = json.loads(candidate[start_idx:end_idx+1], strict=False)
+        if isinstance(data, dict) and "name" in data and isinstance(data["name"], str):
+            fn_name = data["name"]
+            if fn_name not in TOOL_REGISTRY:
+                return fn_name
+    except Exception:
+        pass
+    return None
+
+
+def _stage_workspace_files(file_metadata: Optional[List[FileMetadata]], session_id: str, target_session_id: str):
+    """Pre-execution file staging: copies input files from host paths into session workspace directories."""
+    if not file_metadata:
+        return
+
+    for fm in file_metadata:
+        src_path_str = getattr(fm, "filepath", None) or getattr(fm, "path", None) or fm.filename
+        src_path = Path(src_path_str)
+        if src_path.exists() and src_path.is_file():
+            for sid in set([target_session_id, session_id, "workbench_session", "default_session"]):
+                try:
+                    target_workspace_path = validate_workspace_path(fm.filename, sid, create_parents=True)
+                    if not target_workspace_path.exists() or target_workspace_path.stat().st_size != src_path.stat().st_size:
+                        shutil.copy2(src_path, target_workspace_path)
+                except Exception:
+                    pass
+
+
+# ============================================================================
+# GRAPH NODES
+# ============================================================================
+
+def route_node(state: WorkbenchState) -> dict:
+    """
+    Node 1: Evaluates 3-stage waterfall router and initializes workspace system prompts.
+    """
+    decision = route(state.prompt, state.file_metadata)
+    role = decision.role if decision else "reasoning"
+    sys_prompt = ROLE_SYSTEM_PROMPTS.get(role, ROLE_SYSTEM_PROMPTS["reasoning"])
+
+    # Provide workspace file instructions when input files are attached
+    workspace_context = ""
+    if state.file_metadata:
+        file_previews = []
+        has_images = any(fm.extension.strip().lower() in IMAGE_FILE_EXTENSIONS for fm in state.file_metadata)
+        for fm in state.file_metadata:
+            fp = Path(getattr(fm, "filepath", None) or getattr(fm, "path", None) or fm.filename)
+            if fm.extension.strip().lower() in (".csv", ".txt") and fp.exists():
+                try:
+                    with open(fp, "r", encoding="utf-8", errors="ignore") as f_hdr:
+                        header_line = f_hdr.readline().strip()
+                        if header_line:
+                            file_previews.append(f"'{fm.filename}' (columns: {header_line})")
+                        else:
+                            file_previews.append(f"'{fm.filename}'")
+                except Exception:
+                    file_previews.append(f"'{fm.filename}'")
+            else:
+                file_previews.append(f"'{fm.filename}'")
+
+        if file_previews:
+            workspace_context = (
+                f"\n\n[Workspace Context]: The file(s) {', '.join(file_previews)} are available in your working directory. "
+                "When referencing CSV columns in python code_sandbox or spreadsheet tools, use the exact column names provided in the header."
+            )
+            if has_images:
+                workspace_context += (
+                    "\n[Multimodal Vision Active]: The attached image(s) are passed directly into your visual vision context. "
+                    "Analyze and describe the image(s) directly from your visual input. Do NOT invoke `ocr_vlm` or external tools."
+                )
+
+    fast_context = ""
+    if hasattr(state, "thinking") and not state.thinking:
+        fast_context = "\n\n[Fast Mode Active]: Provide a direct, concise response immediately. Do NOT output any <think>...</think> reasoning tags or internal thinking traces."
+
+    system_msg = {"role": "system", "content": sys_prompt + workspace_context + fast_context}
+    existing_messages = list(state.messages) if state.messages else []
+
+    if existing_messages:
+        if existing_messages[0].get("role") == "system":
+            existing_messages[0] = system_msg
+        else:
+            existing_messages.insert(0, system_msg)
+        existing_messages.append({"role": "user", "content": state.prompt})
+        updated_messages = existing_messages
+    else:
+        updated_messages = [
+            system_msg,
+            {"role": "user", "content": state.prompt}
+        ]
+
+    return {
+        "route_decision": decision,
+        "messages": updated_messages
+    }
+
+
 def infer_node(state: WorkbenchState) -> dict:
-    """Node 2: Runs Ollama inference with function tool schemas and image support."""
+    """
+    Node 2: Executes Ollama LLM inference with tool schemas, image support, and fallback JSON parsing.
+    """
     rd = state.route_decision
     if isinstance(rd, dict):
         role = rd.get("role", "reasoning")
@@ -120,8 +204,7 @@ def infer_node(state: WorkbenchState) -> dict:
 
     model_tag = MODEL_REGISTRY.get(role, MODEL_REGISTRY["reasoning"])
     
-    # Extension-based check for image files in state.file_metadata
-    # Only pass images on the first infer_node call of an invocation (tool_iteration_count == 0)
+    # Pass images only on first infer_node iteration
     images = None
     if state.tool_iteration_count == 0 and state.file_metadata:
         for fm in state.file_metadata:
@@ -133,26 +216,42 @@ def infer_node(state: WorkbenchState) -> dict:
                 images = [img_path]
                 break
 
-    # Execute inference with message history, tool schemas, and optional images
     msg_dict = run_inference_raw(
         messages=state.messages,
         role=role,
         model=model_tag,
         tools=OLLAMA_TOOL_SCHEMAS,
-        images=images
+        images=images,
+        thinking=getattr(state, "thinking", True)
     )
 
-    # Extract tool_calls if present in assistant response
     raw_calls = msg_dict.get("tool_calls", []) or []
     content = msg_dict.get("content", "")
 
-    # Fallback: if native tool_calls is empty, attempt JSON fallback parsing from content
+    # Fallback parsing for text JSON tool calls
     if not raw_calls and content:
         fallback_call = parse_json_tool_call(content)
         if fallback_call:
             raw_calls = [fallback_call]
             msg_dict = dict(msg_dict)
             msg_dict["tool_calls"] = raw_calls
+            msg_dict["content"] = ""
+            content = ""
+        else:
+            pseudo_func = detect_pseudo_json_tool_call(content)
+            if pseudo_func:
+                fallback_msgs = list(state.messages) + [
+                    {"role": "user", "content": f"Do not output JSON tool calls. Provide the complete code implementation for '{pseudo_func}' directly using markdown code blocks."}
+                ]
+                msg_dict = run_inference_raw(
+                    messages=fallback_msgs,
+                    role=role,
+                    model=model_tag,
+                    tools=None,
+                    images=images,
+                    thinking=getattr(state, "thinking", True)
+                )
+                content = msg_dict.get("content", "")
 
     updated_messages = list(state.messages) + [msg_dict]
 
@@ -164,7 +263,9 @@ def infer_node(state: WorkbenchState) -> dict:
 
 
 def should_continue(state: WorkbenchState) -> str:
-    """Conditional Edge: Determines whether to route to tool_node or END."""
+    """
+    Conditional Edge: Routes to tool_node if tool calls exist and iteration count is below max limit.
+    """
     has_tool_calls = bool(state.tool_calls)
     below_iteration_limit = state.tool_iteration_count < state.max_tool_iterations
 
@@ -176,25 +277,20 @@ def should_continue(state: WorkbenchState) -> str:
 def tool_node(state: WorkbenchState) -> dict:
     """
     Node 3: Single Tool Dispatcher Node.
-    Dispatches tool calls through 3 distinct try/except failure stages:
+    Executes tool calls across 3 failure containment stages:
       Stage 1: Unknown tool name -> failure_type="unknown_tool"
       Stage 2: Invalid/malformed args -> failure_type="invalid_args"
-      Stage 3: Tool execution failure -> failure_type="execution_error"
+      Stage 3: Tool execution exception -> failure_type="execution_error"
     """
     updated_messages = list(state.messages)
     accumulated_results = list(state.tool_results)
-    
-    # Synthesize session_id if not present in state
     session_id = getattr(state, "session_id", None) or "workbench_session"
 
     for call in state.tool_calls:
-        # Step 8: Tool Call ID handling (Synthesize UUID if missing)
         call_id = call.get("id") or str(uuid4())
-        
         tool_name = ""
         raw_args = {}
 
-        # Handle dict or function call object
         if isinstance(call, dict):
             func_info = call.get("function", {})
             tool_name = func_info.get("name") or call.get("name") or ""
@@ -203,13 +299,12 @@ def tool_node(state: WorkbenchState) -> dict:
             tool_name = getattr(call, "name", "")
             raw_args = getattr(call, "arguments", {})
 
-        # Ensure session_id is injected into input args if required by tool
         if isinstance(raw_args, dict) and "session_id" not in raw_args:
             raw_args["session_id"] = session_id
 
         tool_result = None
 
-        # Stage 1: Unknown Tool Name Check
+        # Stage 1: Unknown Tool Name
         if tool_name not in TOOL_REGISTRY:
             tool_result = ToolResult(
                 status=ToolStatus.ERROR,
@@ -217,7 +312,7 @@ def tool_node(state: WorkbenchState) -> dict:
                 metadata={"failure_type": "unknown_tool", "tool_name": tool_name}
             )
         else:
-            # Stage 2: Invalid / Malformed Arguments Check
+            # Stage 2: Argument Validation
             input_cls = TOOL_INPUT_TYPES[tool_name]
             validated_input = None
             try:
@@ -232,31 +327,11 @@ def tool_node(state: WorkbenchState) -> dict:
                     metadata={"failure_type": "invalid_args", "tool_name": tool_name}
                 )
 
-            # Stage 3: Tool Execution Failure Check
+            # Stage 3: Execution
             if validated_input is not None:
                 try:
-                    # File-staging step for code execution: stage input files into session workspace via audited file_io write
-                    if tool_name == "code_sandbox" and state.file_metadata:
-                        for fm in state.file_metadata:
-                            src_path_str = getattr(fm, "filepath", None) or getattr(fm, "path", None) or fm.filename
-                            src_path = Path(src_path_str)
-                            if src_path.exists() and src_path.is_file():
-                                try:
-                                    with open(src_path, "r", encoding="utf-8", errors="ignore") as f:
-                                        file_content = f.read()
-                                    file_io_tool = TOOL_REGISTRY.get("file_io")
-                                    file_io_cls = TOOL_INPUT_TYPES.get("file_io")
-                                    if file_io_tool and file_io_cls:
-                                        stage_in = file_io_cls(
-                                            operation="write",
-                                            path=fm.filename,
-                                            content=file_content,
-                                            session_id=session_id
-                                        )
-                                        stage_res = file_io_tool(stage_in)
-                                        accumulated_results.append(stage_res)
-                                except Exception:
-                                    pass
+                    target_session_id = (isinstance(raw_args, dict) and raw_args.get("session_id")) or session_id
+                    _stage_workspace_files(state.file_metadata, session_id, target_session_id)
 
                     tool_func = TOOL_REGISTRY[tool_name]
                     tool_result = tool_func(validated_input)
@@ -269,7 +344,7 @@ def tool_node(state: WorkbenchState) -> dict:
 
         accumulated_results.append(tool_result)
 
-        # Step 9: Feed tool result back to model with tool_call_id
+        # Append tool message back to state history
         tool_msg = {
             "role": "tool",
             "content": tool_result.model_dump_json(),
@@ -277,18 +352,20 @@ def tool_node(state: WorkbenchState) -> dict:
         }
         updated_messages.append(tool_msg)
 
-    new_iteration_count = state.tool_iteration_count + 1
-
     return {
         "messages": updated_messages,
         "tool_results": accumulated_results,
-        "tool_iteration_count": new_iteration_count,
-        "tool_calls": []  # Reset tool_calls after processing
+        "tool_iteration_count": state.tool_iteration_count + 1,
+        "tool_calls": []
     }
 
 
+# ============================================================================
+# ORCHESTRATOR BUILDER & ENTRYPOINT
+# ============================================================================
+
 def build_orchestrator_graph():
-    """Assembles the ReAct LangGraph StateGraph with tool loop."""
+    """Assembles the ReAct LangGraph StateGraph with conditional tool loop."""
     builder = StateGraph(WorkbenchState)
     builder.add_node("route", route_node)
     builder.add_node("infer", infer_node)
@@ -297,7 +374,6 @@ def build_orchestrator_graph():
     builder.add_edge(START, "route")
     builder.add_edge("route", "infer")
     
-    # ReAct Conditional Tool Loop
     builder.add_conditional_edges(
         "infer",
         should_continue,
@@ -315,20 +391,10 @@ def run_workbench(
     prompt: str,
     file_metadata: Optional[List[FileMetadata]] = None,
     thread_id: Optional[str] = None,
-    max_tool_iterations: int = 5
+    max_tool_iterations: int = 5,
+    thinking: bool = True
 ) -> Tuple[Dict[str, Any], str]:
-    """
-    Executes the workbench orchestrator graph end-to-end.
-    
-    Args:
-        prompt: User input text request.
-        file_metadata: Optional list of attached FileMetadata objects.
-        thread_id: Unique invocation thread ID (generated via uuid4 if None).
-        max_tool_iterations: Maximum loop safety iteration count (default 5).
-        
-    Returns:
-        Tuple of (final_state_dict, thread_id)
-    """
+    """Runs a complete workbench execution turn synchronously inside SqliteSaver context."""
     selected_thread_id = thread_id or str(uuid4())
     config = {"configurable": {"thread_id": selected_thread_id}}
 
@@ -336,11 +402,17 @@ def run_workbench(
 
     with SqliteSaver.from_conn_string(DB_FILENAME) as checkpointer:
         graph = builder.compile(checkpointer=checkpointer)
-        initial_state = {
-            "prompt": prompt,
-            "file_metadata": file_metadata,
-            "max_tool_iterations": max_tool_iterations
-        }
+        snapshot = graph.get_state(config)
+        existing_values = snapshot.values or {}
+        existing_messages = existing_values.get("messages", [])
+
+        initial_state = WorkbenchState(
+            prompt=prompt,
+            file_metadata=file_metadata,
+            messages=existing_messages,
+            max_tool_iterations=max_tool_iterations,
+            thinking=thinking
+        )
         final_state = graph.invoke(initial_state, config=config)
 
     return final_state, selected_thread_id

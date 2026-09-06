@@ -19,6 +19,12 @@ chroma_db/
 *.db-wal
 *.log
 
+# Node / React Frontend
+node_modules/
+dist/
+frontend/node_modules/
+frontend/dist/
+
 # OS / IDE
 .DS_Store
 .vscode/

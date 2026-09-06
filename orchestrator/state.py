@@ -20,4 +20,8 @@ class WorkbenchState(BaseModel):
     tool_results: List[ToolResult] = Field(default_factory=list)
     tool_iteration_count: int = 0
     max_tool_iterations: int = 5
+    thinking: bool = True
     response: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    plan_steps: Optional[List[str]] = None
+

@@ -85,14 +85,20 @@ class DocGenInput(ToolInput):
                 data["format"] = data.pop("output_format")
             if data.get("format") in ("word", "doc", "document"):
                 data["format"] = "docx"
+            if data.get("format") in ("ppt", "pptx", "powerpoint", "slides", "presentation"):
+                data["format"] = "pptx"
+            if data.get("format") in ("excel", "sheet", "spreadsheet", "xls"):
+                data["format"] = "xlsx"
 
             # 2. Normalize spec from docx_spec / pptx_spec / xlsx_spec / sections
             if "spec" not in data or not data["spec"]:
-                for alt_key in ("docx_spec", "pptx_spec", "xlsx_spec", "sections"):
+                for alt_key in ("docx_spec", "pptx_spec", "xlsx_spec", "sections", "slides"):
                     if alt_key in data:
                         alt_val = data.get(alt_key)
                         if alt_key == "sections" and isinstance(alt_val, list):
                             data["spec"] = {"title": "Generated Document", "sections": alt_val}
+                        elif alt_key == "slides" and isinstance(alt_val, list):
+                            data["spec"] = {"slides": alt_val}
                         else:
                             data["spec"] = alt_val
                         break
@@ -245,6 +251,115 @@ def _render_xlsx(spec: XlsxSpec, output_file: Path):
     wb.save(str(output_file))
 
 
+import json
+
+
+def _normalize_docx_spec(raw_spec: Any) -> dict:
+    """Normalizes dict/string specs emitted by LLMs into valid DocxSpec schema."""
+    if isinstance(raw_spec, str):
+        try:
+            raw_spec = json.loads(raw_spec)
+        except Exception:
+            raw_spec = {"title": "Document Deliverable", "sections": [{"body": str(raw_spec)}]}
+
+    if not isinstance(raw_spec, dict):
+        raw_spec = {"title": "Document Deliverable", "sections": []}
+
+    title = raw_spec.get("title") or raw_spec.get("document_title") or "Document Deliverable"
+    raw_sections = raw_spec.get("sections") or raw_spec.get("blocks") or raw_spec.get("content") or []
+    if not isinstance(raw_sections, list):
+        raw_sections = [raw_sections]
+
+    normalized_sections = []
+    for sec in raw_sections:
+        if isinstance(sec, str):
+            normalized_sections.append({"body": sec})
+        elif isinstance(sec, dict):
+            if "headers" in sec or "rows" in sec or "table" in sec:
+                headers = sec.get("headers") or []
+                rows = sec.get("rows") or []
+                normalized_sections.append({
+                    "headers": [str(h) for h in headers],
+                    "rows": [[str(c) for c in r] if isinstance(r, list) else [str(r)] for r in rows]
+                })
+            elif "path" in sec or "image_path" in sec:
+                img_p = sec.get("path") or sec.get("image_path") or ""
+                normalized_sections.append({
+                    "path": str(img_p),
+                    "caption": str(sec.get("caption")) if sec.get("caption") else None
+                })
+            else:
+                body_val = sec.get("body") or sec.get("content") or sec.get("text") or sec.get("description") or sec.get("details") or ""
+                heading_val = sec.get("heading") or sec.get("title") or sec.get("section") or sec.get("header")
+                normalized_sections.append({
+                    "heading": str(heading_val) if heading_val else None,
+                    "body": str(body_val)
+                })
+
+    return {"title": str(title), "sections": normalized_sections}
+
+
+def _normalize_pptx_spec(raw_spec: Any) -> dict:
+    """Normalizes dict/string/list specs emitted by LLMs into valid PptxSpec schema."""
+    if isinstance(raw_spec, str):
+        try:
+            raw_spec = json.loads(raw_spec)
+        except Exception:
+            raw_spec = {"slides": [{"title": "Presentation Deliverable", "blocks": [{"body": str(raw_spec)}]}]}
+
+    if isinstance(raw_spec, list):
+        raw_spec = {"slides": raw_spec}
+
+    if not isinstance(raw_spec, dict):
+        raw_spec = {"slides": []}
+
+    slides_list = raw_spec.get("slides") or raw_spec.get("sections") or []
+    if not isinstance(slides_list, list):
+        slides_list = [slides_list]
+
+    normalized_slides = []
+    for s_idx, slide_data in enumerate(slides_list):
+        if isinstance(slide_data, str):
+            normalized_slides.append({
+                "title": f"Slide {s_idx + 1}",
+                "blocks": [{"body": slide_data}]
+            })
+        elif isinstance(slide_data, dict):
+            stitle = slide_data.get("title") or slide_data.get("heading") or f"Slide {s_idx + 1}"
+            blocks_raw = slide_data.get("blocks") or slide_data.get("content") or slide_data.get("sections") or []
+            if not isinstance(blocks_raw, list):
+                blocks_raw = [blocks_raw]
+
+            normalized_blocks = []
+            for b in blocks_raw:
+                if isinstance(b, str):
+                    normalized_blocks.append({"body": b})
+                elif isinstance(b, dict):
+                    if "headers" in b or "rows" in b:
+                        normalized_blocks.append({
+                            "headers": [str(h) for h in b.get("headers", [])],
+                            "rows": [[str(c) for c in r] if isinstance(r, list) else [str(r)] for r in b.get("rows", [])]
+                        })
+                    elif "path" in b or "image_path" in b:
+                        normalized_blocks.append({
+                            "path": str(b.get("path") or b.get("image_path") or ""),
+                            "caption": str(b.get("caption")) if b.get("caption") else None
+                        })
+                    else:
+                        b_head = b.get("heading") or b.get("title")
+                        b_body = b.get("body") or b.get("content") or b.get("text") or ""
+                        normalized_blocks.append({
+                            "heading": str(b_head) if b_head else None,
+                            "body": str(b_body)
+                        })
+            normalized_slides.append({
+                "title": str(stitle),
+                "blocks": normalized_blocks
+            })
+
+    return {"slides": normalized_slides}
+
+
 @audited_tool
 def doc_gen(input: DocGenInput) -> DocGenResult:
     fmt = input.format.lower().strip()
@@ -262,11 +377,13 @@ def doc_gen(input: DocGenInput) -> DocGenResult:
 
     try:
         if fmt == "docx":
-            spec_obj = DocxSpec.model_validate(input.spec)
+            norm_spec = _normalize_docx_spec(input.spec)
+            spec_obj = DocxSpec.model_validate(norm_spec)
             _render_docx(spec_obj, output_file, input.session_id)
 
         elif fmt == "pptx":
-            spec_obj = PptxSpec.model_validate(input.spec)
+            norm_spec = _normalize_pptx_spec(input.spec)
+            spec_obj = PptxSpec.model_validate(norm_spec)
             _render_pptx(spec_obj, output_file, input.session_id)
 
         elif fmt == "xlsx":
