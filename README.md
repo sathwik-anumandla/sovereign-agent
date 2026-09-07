@@ -161,10 +161,7 @@ ollama pull nomic-embed-text
 
 ### 3. Install Python Dependencies
 ```bash
-pip install pydantic sympy pandas openpyxl python-docx python-pptx \
-            opencv-python scikit-learn ollama langgraph \
-            langgraph-checkpoint-sqlite paddleocr paddlex pypdfium2 \
-            chromadb langchain-text-splitters uvicorn fastapi sse-starlette PyJWT
+pip install pydantic sympy pandas openpyxl python-docx python-pptx opencv-python scikit-learn ollama langgraph langgraph-checkpoint-sqlite paddleocr paddlex pypdfium2 chromadb langchain-text-splitters uvicorn fastapi sse-starlette PyJWT
 ```
 
 ### 4. Install Frontend Dependencies
