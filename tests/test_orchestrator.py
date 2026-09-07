@@ -15,7 +15,10 @@ sys.path.insert(0, ROOT_DIR)
 
 from router.schemas import FileMetadata
 from orchestrator import run_workbench, DB_FILENAME
-from inspect_run import inspect_thread, list_recent_thread_ids
+try:
+    from scripts.inspect_run import inspect_thread, list_recent_thread_ids
+except ImportError:
+    from scripts.inspect_run import inspect_thread, list_recent_thread_ids
 
 
 def test_phase5_orchestrator_skeleton():

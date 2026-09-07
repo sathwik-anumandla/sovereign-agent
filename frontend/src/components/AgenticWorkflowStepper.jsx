@@ -64,8 +64,8 @@ export default function AgenticWorkflowStepper({
 
   // Model-generated plan text string
   const planString = planSteps.length > 0
-    ? planSteps.join(' ➔ ')
-    : (hasTools ? `Execute tools ➔ Analyze ➔ Output response` : `Direct response synthesis`);
+    ? planSteps.join(' -> ')
+    : (hasTools ? `Execute tools -> Analyze -> Output response` : `Direct response synthesis`);
 
   return (
     <div className="my-2 font-mono text-sm">

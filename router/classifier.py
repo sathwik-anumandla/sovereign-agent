@@ -42,7 +42,10 @@ def _load_models():
 
         if need_retrain:
             try:
-                from train_router_classifier import train
+                try:
+                    from scripts.train_router_classifier import train
+                except ImportError:
+                    from train_router_classifier import train
                 train()
                 with open(VECTORIZER_PATH, "rb") as f:
                     _vectorizer = pickle.load(f)

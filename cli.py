@@ -52,7 +52,7 @@ def execute_prompt(prompt_text: str, file_path: Optional[str] = None, thread_id:
     print(f"\nProcessing prompt: '{prompt_text}'")
     if file_metadata_list:
         print(f"Attached file    : {file_path}")
-    print(f"Mode             : {'⚡ Fast Mode' if fast else '🧠 Thinking Mode'}")
+    print(f"Mode             : {' Fast Mode' if fast else ' Thinking Mode'}")
     print("=" * 60)
 
     try:
@@ -115,7 +115,7 @@ def interactive_mode(file_path: Optional[str] = None, fast: bool = True):
     print("\n" + "=" * 60)
     print(" Sovereign Agentic AI Workbench - Interactive CLI")
     print(f" Thread ID : {session_thread_id}")
-    print(f" Mode      : {'⚡ Fast Mode (Default)' if fast else '🧠 Deep Thinking Mode'}")
+    print(f" Mode      : {' Fast Mode (Default)' if fast else ' Deep Thinking Mode'}")
     if file_path:
         print(f" Attachment: {file_path}")
     print(" Type your prompt below. Type 'exit' or 'quit' to stop.")

@@ -10,10 +10,19 @@ Test Steps:
 4. Verifies persistent state restoration from workbench_checkpoints.db via SqliteSaver.
 """
 
+import sys
+import os
 import time
 import uuid
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
+
 from orchestrator import run_workbench, DB_FILENAME
-from inspect_run import inspect_thread
+try:
+    from scripts.inspect_run import inspect_thread
+except ImportError:
+    from scripts.inspect_run import inspect_thread
 
 
 def run_turn(thread_id: str, prompt: str, turn_num: int) -> str:

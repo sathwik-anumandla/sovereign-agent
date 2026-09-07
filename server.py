@@ -31,7 +31,10 @@ from router.schemas import FileMetadata, RouteDecision
 from router.route import route
 from phase1_inference import MODEL_REGISTRY
 from tool_interface import validate_workspace_path, ToolStatus
-from inspect_run import list_recent_thread_ids
+try:
+    from scripts.inspect_run import list_recent_thread_ids
+except ImportError:
+    from inspect_run import list_recent_thread_ids
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 # RBAC & User Administration

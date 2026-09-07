@@ -1,6 +1,6 @@
 # PowerShell stop script for Sovereign AI Workbench on Windows
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "      🛑 STOPPING ALL SOVEREIGN AI WORKBENCH SERVICES (WINDOWS)" -ForegroundColor Cyan
+Write-Host "      [STOP] STOPPING ALL SOVEREIGN AI WORKBENCH SERVICES (WINDOWS)" -ForegroundColor Cyan
 Write-Host "======================================================================" -ForegroundColor Cyan
 
 # Kill port 8000
@@ -31,5 +31,5 @@ if ($ollamaProc) {
 }
 
 Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "  ✅ ALL WORKBENCH SERVICES & OLLAMA SERVER STOPPED SUCCESSFULLY" -ForegroundColor Green
+Write-Host "  [OK] ALL WORKBENCH SERVICES & OLLAMA SERVER STOPPED SUCCESSFULLY" -ForegroundColor Green
 Write-Host "======================================================================" -ForegroundColor Cyan

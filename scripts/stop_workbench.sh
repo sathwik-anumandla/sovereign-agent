@@ -7,7 +7,7 @@
 # ==============================================================================
 
 echo "======================================================================"
-echo "      🛑 STOPPING ALL SOVEREIGN AI WORKBENCH SERVICES"
+echo "      [STOP] STOPPING ALL SOVEREIGN AI WORKBENCH SERVICES"
 echo "======================================================================"
 
 # 1. Stop FastAPI backend on port 8000
@@ -40,5 +40,5 @@ else
 fi
 
 echo "======================================================================"
-echo "  ✅ ALL WORKBENCH SERVICES & OLLAMA SERVER STOPPED SUCCESSFULLY"
+echo "  [OK] ALL WORKBENCH SERVICES & OLLAMA SERVER STOPPED SUCCESSFULLY"
 echo "======================================================================"

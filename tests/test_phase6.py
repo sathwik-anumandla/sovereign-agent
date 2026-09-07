@@ -25,7 +25,7 @@ from router.schemas import RouteDecision
 from orchestrator.state import WorkbenchState
 from orchestrator.graph import tool_node, should_continue, run_workbench, build_orchestrator_graph, DB_FILENAME
 from langgraph.checkpoint.sqlite import SqliteSaver
-from inspect_run import inspect_thread
+from scripts.inspect_run import inspect_thread
 
 
 def test_tool_node_failure_stages():

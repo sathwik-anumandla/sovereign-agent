@@ -9,20 +9,20 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR/.."
 
 mkdir -p logs
 
 echo "======================================================================"
-echo "      🚀 STARTING SOVEREIGN AI WORKBENCH (SIH PS 26117)"
+echo "      [START] STARTING SOVEREIGN AI WORKBENCH (SIH PS 26117)"
 echo "======================================================================"
 
 # 1. Check & Start Ollama Server
 echo -n "[1/4] Checking Ollama server (http://127.0.0.1:11434)... "
 if curl -s -f http://127.0.0.1:11434/api/tags > /dev/null 2>&1; then
-    echo "✅ Running"
+    echo "[OK] Running"
 else
-    echo "⚠️ Not running. Launching 'ollama serve'..."
+    echo "[WARNING] Not running. Launching 'ollama serve'..."
     ollama serve > logs/ollama.log 2>&1 &
     OLLAMA_PID=$!
     echo "     Ollama started in background (PID: $OLLAMA_PID, log: logs/ollama.log)"
@@ -34,7 +34,7 @@ else
         sleep 1
         COUNT=$((COUNT+1))
         if [ $COUNT -ge $MAX_WAIT ]; then
-            echo "❌ Error: Ollama failed to respond after ${MAX_WAIT}s. Check logs/ollama.log"
+            echo "[ERROR] Error: Ollama failed to respond after ${MAX_WAIT}s. Check logs/ollama.log"
             exit 1
         fi
     done
@@ -49,9 +49,9 @@ echo "     Available models: $INSTALLED_MODELS"
 # 3. Check & Start FastAPI Backend Server
 echo -n "[3/4] Checking FastAPI backend server (http://localhost:8000)... "
 if curl -s http://localhost:8000/docs > /dev/null 2>&1; then
-    echo "✅ Running"
+    echo "[OK] Running"
 else
-    echo "⚠️ Not running. Launching FastAPI backend..."
+    echo "[WARNING] Not running. Launching FastAPI backend..."
     python3 server.py > logs/backend.log 2>&1 &
     BACKEND_PID=$!
     echo "     Backend started in background (PID: $BACKEND_PID, log: logs/backend.log)"
@@ -63,7 +63,7 @@ else
         sleep 1
         COUNT=$((COUNT+1))
         if [ $COUNT -ge $MAX_WAIT ]; then
-            echo "❌ Error: Backend failed to respond after ${MAX_WAIT}s. Check logs/backend.log"
+            echo "[ERROR] Error: Backend failed to respond after ${MAX_WAIT}s. Check logs/backend.log"
             exit 1
         fi
     done
@@ -73,9 +73,9 @@ fi
 # 4. Check & Start React Frontend
 echo -n "[4/4] Checking React Frontend dev server (http://localhost:3000)... "
 if curl -s http://localhost:3000 > /dev/null 2>&1; then
-    echo "✅ Running"
+    echo "[OK] Running"
 else
-    echo "⚠️ Not running. Launching React frontend..."
+    echo "[WARNING] Not running. Launching React frontend..."
     (cd frontend && npm run dev > ../logs/frontend.log 2>&1 &)
     FRONTEND_PID=$!
     echo "     Frontend started in background (PID: $FRONTEND_PID, log: logs/frontend.log)"
@@ -87,14 +87,14 @@ else
         sleep 1
         COUNT=$((COUNT+1))
         if [ $COUNT -ge $MAX_WAIT ]; then
-            echo "⚠️ Frontend startup taking time. Access http://localhost:3000 shortly."
+            echo "[WARNING] Frontend startup taking time. Access http://localhost:3000 shortly."
             break
         fi
     done
 fi
 
 echo "======================================================================"
-echo "  🎉 SOVEREIGN AGENT AI WORKBENCH IS UP AND RUNNING!"
+echo "  [SUCCESS] SOVEREIGN AGENT AI WORKBENCH IS UP AND RUNNING!"
 echo "======================================================================"
 echo "  • React Frontend UI : http://localhost:3000"
 echo "  • FastAPI API Docs  : http://localhost:8000/docs"

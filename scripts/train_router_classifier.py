@@ -1,16 +1,19 @@
 """
-train_router_classifier.py
+scripts/train_router_classifier.py
 
 Offline training script for Stage 3 fallback classifier in the P4 router.
 Trains TF-IDF vectorizer + Logistic Regression model on expanded dataset of coding vs reasoning prompts.
 """
 
 import pickle
+from pathlib import Path
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 
-# --- Expanded Training Data ---
-# (prompt, label) pairs. Label is "coding" or "reasoning".
+ROOT_DIR = Path(__file__).parent.parent
+VECTORIZER_PATH = ROOT_DIR / "router_vectorizer.pkl"
+CLASSIFIER_PATH = ROOT_DIR / "router_classifier.pkl"
+
 TRAINING_DATA = [
     # --- CODING (Explicit programming, debugging, refactoring, script creation, syntax, API execution) ---
     ("this function isn't returning what I expect, can you look at it", "coding"),
@@ -136,6 +139,7 @@ TRAINING_DATA = [
     ("how to make a sandwich", "reasoning"),
 ]
 
+
 def train():
     texts = [t for t, _ in TRAINING_DATA]
     labels = [l for _, l in TRAINING_DATA]
@@ -146,14 +150,15 @@ def train():
     classifier = LogisticRegression(max_iter=1000)
     classifier.fit(X, labels)
 
-    with open("router_vectorizer.pkl", "wb") as f:
+    with open(VECTORIZER_PATH, "wb") as f:
         pickle.dump(vectorizer, f)
 
-    with open("router_classifier.pkl", "wb") as f:
+    with open(CLASSIFIER_PATH, "wb") as f:
         pickle.dump(classifier, f)
 
     print(f"Trained on {len(texts)} examples ({labels.count('coding')} coding, {labels.count('reasoning')} reasoning).")
-    print("Saved router_vectorizer.pkl and router_classifier.pkl")
+    print(f"Saved {VECTORIZER_PATH.name} and {CLASSIFIER_PATH.name}")
+
 
 if __name__ == "__main__":
     train()

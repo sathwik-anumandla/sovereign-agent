@@ -1,16 +1,23 @@
 """
-P9 - Flow 1 Integration Test Harness: Scanned Report -> Approval Note Document.
+P9 - Flow 4 Integration Test: OCR -> RAG -> Word Document Generation.
 Confirms ReAct orchestrator handles scanned PDF document processing via ocr_vlm,
 queries rag_kb vectorstore, and generates an approval note .docx via doc_gen tool.
 """
 
+import sys
+import os
 import uuid
 from pathlib import Path
-from langgraph.checkpoint.sqlite import SqliteSaver
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 
 from orchestrator import build_orchestrator_graph, DB_FILENAME, WorkbenchState
 from router.schemas import FileMetadata
-from inspect_run import inspect_thread
+try:
+    from scripts.inspect_run import inspect_thread
+except ImportError:
+    from scripts.inspect_run import inspect_thread
 
 EXPECTED_TOOLS = ["ocr_vlm", "rag_kb", "doc_gen"]
 
@@ -55,7 +62,7 @@ def main():
     print("\n--- Checkpoint History ---")
     inspect_thread(thread_id)
 
-    # Tool execution sequence and Pass/Fail verification
+    # Tool execution summary and Pass/Fail verification
     tool_results = result.get("tool_results", []) or []
     called_tools = []
     docx_file_path = None
@@ -111,9 +118,9 @@ def main():
     print("=" * 75)
 
     if all_3_fired and reached_end and docx_exists:
-        print("\n>>> FLOW 1 TEST SUITE RESULT: SUCCESS (PASS)")
+        print("\n>>> FLOW 4 TEST SUITE RESULT: SUCCESS (PASS)")
     else:
-        print("\n>>> FLOW 1 TEST SUITE RESULT: FAILURE (FAIL)")
+        print("\n>>> FLOW 4 TEST SUITE RESULT: FAILURE (FAIL)")
 
 
 if __name__ == "__main__":

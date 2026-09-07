@@ -5,11 +5,18 @@ with NO tool call (especially no ocr_vlm) — file_metadata should not
 trip likely_needs_ocr since this isn't a structured document.
 """
 
+import sys
+import os
 import uuid
-from langgraph.checkpoint.sqlite import SqliteSaver
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 
 from orchestrator import build_orchestrator_graph, DB_FILENAME, WorkbenchState
-from inspect_run import inspect_thread
+try:
+    from scripts.inspect_run import inspect_thread
+except ImportError:
+    from scripts.inspect_run import inspect_thread
 
 
 def main():

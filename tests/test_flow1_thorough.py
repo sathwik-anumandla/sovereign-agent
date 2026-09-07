@@ -10,16 +10,22 @@ Test Scenarios Covered:
   Scenario 4: Programmatic Output Deliverable (.docx) Structure & Integrity Inspection
 """
 
+import sys
 import os
 import uuid
 import docx
 from pathlib import Path
 from typing import List, Dict, Any
-from langgraph.checkpoint.sqlite import SqliteSaver
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 
 from orchestrator import build_orchestrator_graph, DB_FILENAME, WorkbenchState
 from router.schemas import FileMetadata
-from inspect_run import inspect_thread
+try:
+    from scripts.inspect_run import inspect_thread
+except ImportError:
+    from scripts.inspect_run import inspect_thread
 from tools.rag_kb import rag_kb, RagKbInput
 
 

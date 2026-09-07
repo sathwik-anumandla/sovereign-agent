@@ -22,7 +22,10 @@ from tool_interface import ToolStatus
 from router.schemas import FileMetadata
 from tools.ocr_vlm import ocr_vlm, OCRVLMInput, OCR_CONFIDENCE_THRESHOLD
 from orchestrator import run_workbench
-from inspect_run import inspect_thread
+try:
+    from scripts.inspect_run import inspect_thread
+except ImportError:
+    from scripts.inspect_run import inspect_thread
 
 SESSION_ID = "test_phase7_session"
 WORKSPACE_DIR = Path(ROOT_DIR) / "workspace" / SESSION_ID

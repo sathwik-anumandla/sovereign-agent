@@ -1,6 +1,6 @@
 @echo off
 echo ======================================================================
-echo       🛑 STOPPING ALL SOVEREIGN AI WORKBENCH SERVICES (WINDOWS)
+echo       [STOP] STOPPING ALL SOVEREIGN AI WORKBENCH SERVICES (WINDOWS)
 echo ======================================================================
 
 echo • Stopping FastAPI backend server (port 8000)...
@@ -18,5 +18,5 @@ taskkill /F /IM ollama.exe >nul 2>&1
 taskkill /F /IM "ollama app.exe" >nul 2>&1
 
 echo ======================================================================
-echo   ✅ ALL WORKBENCH SERVICES & OLLAMA SERVER STOPPED SUCCESSFULLY
+echo   [OK] ALL WORKBENCH SERVICES & OLLAMA SERVER STOPPED SUCCESSFULLY
 echo ======================================================================
