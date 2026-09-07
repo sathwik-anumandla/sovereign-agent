@@ -4,7 +4,8 @@
 > *Sovereign On-Premise Agentic AI Workbench using Open-Weight Multimodal LLMs for Confidential Industrial Operations*  
 > **Target Deployments**: Mangalore Refinery and Petrochemicals Limited (MRPL) / PSUs / Defence / Air-Gapped Infrastructures
 
---- ## Executive Summary
+--- 
+## Executive Summary
 
 The **Sovereign On-Premise Agentic AI Workbench** is a 100% air-gapped, confidential AI assistant designed for industrial engineering, refinery management, enterprise document workflows, and data analytics. Running entirely on local hardware (Apple Silicon / NVIDIA GPU) via **Ollama**, it guarantees **zero outbound network data exfiltration** while delivering industrial-grade agentic capabilities.
 
@@ -17,16 +18,18 @@ The **Sovereign On-Premise Agentic AI Workbench** is a 100% air-gapped, confiden
 - **7 Standalone Audited Tools**: SymPy math solver, Python code execution sandbox, pandas tabular data engine, document deliverable generator (`.docx`, `.pptx`, `.xlsx`), workspace file I/O, OCR/VLM, and RAG search.
 - **Minimalist Industrial UI**: Anthropic Claude-inspired interface with dark and light theme palettes, real-time SSE streaming steppers, and enterprise RBAC user controls.
 
---- ## Deep-Dive Documentation Index
+--- 
+## Deep-Dive Documentation Index
 
-For detailed architectural and deployment guides, refer to the documentation in [`docs/`](file:///Users/sathwikanumandla/dev/projects/agent/docs):
+For detailed architectural and deployment guides, refer to the documentation in [`docs/`](docs/):
 
-1.  **[System Architecture & Topology](file:///Users/sathwikanumandla/dev/projects/agent/docs/ARCHITECTURE.md)** — Router waterfall stages, LangGraph ReAct state loops, tool failure containment, and SSE streaming protocol.
-2. [START] **[Setup & Cross-Platform Deployment Guide](file:///Users/sathwikanumandla/dev/projects/agent/docs/SETUP_GUIDE.md)** — Prerequisites, Ollama model setup, virtualenv setup, platform launchers, and troubleshooting.
-3.  **[Authentication & RBAC Security Specification](file:///Users/sathwikanumandla/dev/projects/agent/docs/AUTHENTICATION_AND_RBAC.md)** — JWT bearer auth, user roles (`admin` vs `user`), seed accounts, and multi-tenant thread isolation.
-4.  **[Audited Tool Layer & RAG Knowledge Base](file:///Users/sathwikanumandla/dev/projects/agent/docs/TOOLS_AND_RAG.md)** — 7 standalone tools, confidence-gated OCR/VLM pipeline, and ChromaDB vector store.
+1.  **[System Architecture & Topology](docs/ARCHITECTURE.md)** — Router waterfall stages, LangGraph ReAct state loops, tool failure containment, and SSE streaming protocol.
+2. [START] **[Setup & Cross-Platform Deployment Guide](docs/SETUP_GUIDE.md)** — Prerequisites, Ollama model setup, virtualenv setup, platform launchers, and troubleshooting.
+3.  **[Authentication & RBAC Security Specification](docs/AUTHENTICATION_AND_RBAC.md)** — JWT bearer auth, user roles (`admin` vs `user`), seed accounts, and multi-tenant thread isolation.
+4.  **[Audited Tool Layer & RAG Knowledge Base](docs/TOOLS_AND_RAG.md)** — 7 standalone tools, confidence-gated OCR/VLM pipeline, and ChromaDB vector store.
 
---- ## System Architecture
+--- 
+## System Architecture
 
 ```mermaid
 flowchart TD
@@ -75,7 +78,8 @@ flowchart TD
     InferNode --> Ollama
 ```
 
---- ## Repository Directory Structure
+--- 
+## Repository Directory Structure
 
 ```text
 agent/
@@ -151,7 +155,8 @@ agent/
     └── test_phase8.py             # RAG Knowledge Base tests
 ```
 
---- ## Quickstart & Local Setup
+--- 
+## Quickstart & Local Setup
 
 ### 1. Prerequisites
 - **OS**: macOS / Linux / Windows 10 or 11
@@ -183,7 +188,8 @@ npm install
 cd ..
 ```
 
---- ## [START] Launching the Workbench
+--- 
+## [START] Launching the Workbench
 
 ### macOS & Linux
 To launch Ollama, the FastAPI backend server, and the React frontend UI automatically:
@@ -220,7 +226,8 @@ To stop all services:
 - **FastAPI OpenAPI Docs**: `http://localhost:8000/docs`
 - **Ollama Server**: `http://127.0.0.1:11434`
 
---- ## CLI & Testing Interface
+--- 
+## CLI & Testing Interface
 
 ### Interactive CLI Shell
 ```bash
@@ -242,13 +249,15 @@ python scripts/inspect_run.py <thread_id>
 python tests/run_all.py
 ```
 
---- ## Air-Gap & Security Guarantees
+--- 
+## Air-Gap & Security Guarantees
 
 1. **Zero External Data Exfiltration**: All requests stay within `127.0.0.1`.
 2. **Workspace Path Traversal Protection**: File operations are strictly locked inside `./workspace/<session_id>/`.
 3. **Audited Standalone Tools**: All agent tools are decorated with `@audited_tool`, recording timestamps, durations, and execution status.
 4. **Role-Based Access Control (RBAC)**: Integrated SQLite user authentication and audit metrics for industrial enterprise deployment.
 
---- ## License & SIH Compliance
+--- 
+## License & SIH Compliance
 Built specifically for **Smart India Hackathon (SIH) 2026 — PS 26117**.  
 Targeting air-gapped industrial environments at Mangalore Refinery and Petrochemicals Limited (MRPL).
