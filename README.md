@@ -12,12 +12,12 @@ The **Sovereign On-Premise Agentic AI Workbench** is a 100% air-gapped, confiden
 
 ### Key Highlights
 - **100% Air-Gapped Sovereignty**: Zero cloud API dependencies, zero external WAN telemetry. All inference, document extraction, code execution, and vector embeddings run strictly on loopback (`127.0.0.1`).
-- **4-Stage Waterfall Intent Router**: Intelligent prompt classifier routing requests across model roles (`reasoning`, `coding`, `vision`, `ocr`, `embedding`).
-- **ReAct LangGraph Orchestrator**: Cyclic ReAct workflow with 3-stage tool failure handling, persistent SQLite checkpointers, and loop safety bounds.
+- **Self-Healing 4-Stage Waterfall Intent Router**: Intelligent prompt classifier routing requests across model roles (`reasoning`, `coding`, `vision`, `ocr`, `embedding`) with local auto-healing against cross-platform `scikit-learn` pickle version mismatches.
+- **ReAct LangGraph Orchestrator**: Cyclic ReAct workflow with tool call ID synchronization for Ollama multi-turn tool synthesis, 3-stage tool failure containment, persistent SQLite checkpointers, and loop safety bounds.
 - **Confidence-Gated OCR & VLM Fallback**: Layout-aware document transcription using PaddleOCR (PP-Structure) with dynamic fallbacks to Vision-Language Models (VLM).
 - **RAG & Enterprise Knowledge Base**: Embedded ChromaDB vector store for on-the-fly ingestion, section-aware chunking, and source-cited retrieval.
 - **7 Standalone Audited Tools**: SymPy math solver, Python code execution sandbox, pandas tabular data engine, document deliverable generator (`.docx`, `.pptx`, `.xlsx`), workspace file I/O, OCR/VLM, and RAG search.
-- **Minimalist Industrial UI**: Anthropic Claude-inspired dark mode UI adhering strictly to a 5-color dark palette with real-time SSE streaming steppers.
+- **Minimalist Industrial UI**: Anthropic Claude-inspired interface with dark and light theme palettes, real-time SSE streaming steppers, and enterprise RBAC user controls.
 
 ---
 

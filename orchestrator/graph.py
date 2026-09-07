@@ -228,6 +228,21 @@ def infer_node(state: WorkbenchState) -> dict:
     raw_calls = msg_dict.get("tool_calls", []) or []
     content = msg_dict.get("content", "")
 
+    # Ensure every tool call has a unique 'id' field to match subsequent 'tool' role messages for Ollama API
+    fixed_calls = []
+    for call in raw_calls:
+        if isinstance(call, dict):
+            c_dict = dict(call)
+            if not c_dict.get("id"):
+                c_dict["id"] = f"call_{str(uuid4())[:8]}"
+            fixed_calls.append(c_dict)
+        else:
+            fixed_calls.append(call)
+    raw_calls = fixed_calls
+    msg_dict = dict(msg_dict)
+    if raw_calls:
+        msg_dict["tool_calls"] = raw_calls
+
     # Fallback parsing for text JSON tool calls
     if not raw_calls and content:
         fallback_call = parse_json_tool_call(content)
