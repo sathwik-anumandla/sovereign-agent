@@ -17,11 +17,11 @@ import ollama
 
 # Role -> Concrete Ollama Model Tag Registry
 MODEL_REGISTRY = {
-    "reasoning": "qwen3.5:4b-q4_K_M",
-    "vision": "qwen3.5:4b-q4_K_M",      # Shared with reasoning model -> 0s VRAM swap
-    "coding": "qwen2.5-coder:3b",
-    "ocr": "qwen2.5-vl:3b",
-    "vision_ocr": "qwen2.5-vl:3b",       # Dedicated Vision-OCR fallback model
+    "reasoning": "qwen3.5:9b-q4_K_M",
+    "vision": "qwen3.5:9b-q4_K_M",      # Shared with reasoning model -> 0s VRAM swap
+    "coding": "qwen2.5-coder:7b",
+    "ocr": "qwen2.5-vl:7b",
+    "vision_ocr": "qwen2.5-vl:7b",       # Dedicated Vision-OCR fallback model
     "embedding": "nomic-embed-text"      # Embedding model for RAG KB
 }
 
