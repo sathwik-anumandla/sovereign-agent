@@ -5,7 +5,9 @@ User Roles, Multi-User Isolation, RBAC Management, and Air-Gapped JWT Authentica
 Provides zero-dependency PBKDF2 password hashing and HMAC-SHA256 JWT token verification.
 """
 
+import os
 import sqlite3
+import secrets
 import time
 import json
 import hmac
@@ -16,18 +18,33 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 DB_PATH = Path("workbench_checkpoints.db")
-SECRET_KEY = "sovereign_agent_air_gapped_jwt_secret_key_2026"
-SALT = "sovereign_pbkdf2_salt_airgap"
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "sovereign_agent_air_gapped_jwt_secret_key_2026")
+LEGACY_SALT = "sovereign_pbkdf2_salt_airgap"
 
 
-def hash_password(password: str) -> str:
-    """Hashes a plain text password using PBKDF2-HMAC-SHA256."""
-    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), SALT.encode("utf-8"), 100000).hex()
+def hash_password(password: str, salt: Optional[str] = None) -> str:
+    """Hashes a plain text password using PBKDF2-HMAC-SHA256 with a unique random salt."""
+    if not salt:
+        salt = secrets.token_hex(16)
+    derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
+    return f"{salt}${derived}"
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    """Verifies a plain text password against stored hash."""
-    return hmac.compare_digest(hash_password(password), stored_hash)
+    """Verifies a plain text password against stored hash, supporting both unique salts ($salt$hash) and legacy static hashes."""
+    if not stored_hash:
+        return False
+    if "$" not in stored_hash:
+        legacy_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), LEGACY_SALT.encode("utf-8"), 100000).hex()
+        return hmac.compare_digest(legacy_hash, stored_hash)
+
+    try:
+        salt, derived = stored_hash.split("$", 1)
+        expected = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
+        return hmac.compare_digest(expected, derived)
+    except Exception as e:
+        logging.error(f"Error parsing stored password hash: {e}")
+        return False
 
 
 def create_jwt_token(user_id: str, role: str, expires_in_seconds: int = 86400 * 7) -> str:
