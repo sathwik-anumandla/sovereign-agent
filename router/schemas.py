@@ -34,10 +34,11 @@ class FileMetadata(BaseModel):
 class RouteDecision(BaseModel):
     role: Literal["reasoning", "coding"]
     confidence: float = Field(ge=0.0, le=1.0)
-    method: Literal["multimodal_override", "metadata", "keyword", "classifier"]
+    method: Literal["multimodal_override", "metadata", "keyword", "classifier", "manual_override", "classifier_fallback"]
+    reasoning: Optional[str] = None
 
     @property
     def selected_model(self) -> str:
-        if self.role == "coding":
-            return "qwen2.5-coder:3b"
-        return "qwen3.5:4b-q4_K_M"
+        from config_loader import get_model_registry
+        reg = get_model_registry()
+        return reg.get(self.role, reg.get("reasoning", ""))

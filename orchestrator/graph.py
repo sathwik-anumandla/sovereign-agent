@@ -1,26 +1,26 @@
 """
 orchestrator/graph.py (SIH PS 26117)
 ====================================
-ReAct LangGraph Orchestrator Loop with Tool Execution & SQLite Checkpoint Persistence.
+ReAct LangGraph Orchestrator Loop with Tool Execution & PostgreSQL Checkpoint Persistence.
 
 Topology:
   START -> route_node -> infer_node -> (should_continue) -> tool_node -> infer_node -> ... -> END
 
 Persistent State Storage:
-  SqliteSaver ('workbench_checkpoints.db')
+  PostgresSaver (pgvector enabled PostgreSQL container)
 """
 
 import os
 import re
 import json
 import shutil
-import sqlite3
+import logging
 from pathlib import Path
 from uuid import uuid4
 from typing import Optional, List, Dict, Any, Tuple
 from pydantic import ValidationError
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.postgres import PostgresSaver
 
 from router.route import route
 from router.schemas import FileMetadata, RouteDecision
@@ -28,8 +28,9 @@ from phase1_inference import run_inference_raw, MODEL_REGISTRY, ROLE_SYSTEM_PROM
 from tool_interface import ToolStatus, ToolResult, validate_workspace_path
 from tools.registry import TOOL_REGISTRY, TOOL_INPUT_TYPES, OLLAMA_TOOL_SCHEMAS
 from orchestrator.state import WorkbenchState
+from tools.db import get_db_url, execute_query
 
-DB_FILENAME = "workbench_checkpoints.db"
+logger = logging.getLogger(__name__)
 IMAGE_FILE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
 
 
@@ -129,11 +130,13 @@ def route_node(state: WorkbenchState) -> dict:
     """
     Node 1: Evaluates 3-stage waterfall router and initializes workspace system prompts.
     """
-    decision = route(state.prompt, state.file_metadata)
+    if state.route_decision:
+        decision = state.route_decision
+    else:
+        decision = route(state.prompt, state.file_metadata)
     role = decision.role if decision else "reasoning"
     sys_prompt = ROLE_SYSTEM_PROMPTS.get(role, ROLE_SYSTEM_PROMPTS["reasoning"])
 
-    # Provide workspace file instructions when input files are attached
     workspace_context = ""
     if state.file_metadata:
         file_previews = []
@@ -171,17 +174,24 @@ def route_node(state: WorkbenchState) -> dict:
     system_msg = {"role": "system", "content": sys_prompt + workspace_context + fast_context}
     existing_messages = list(state.messages) if state.messages else []
 
+    user_msg = {"role": "user", "content": state.prompt}
+    if state.file_metadata:
+        user_msg["attachedFiles"] = [
+            {"filename": getattr(fm, "filename", str(fm)), "file_id": getattr(fm, "file_id", None)}
+            for fm in state.file_metadata
+        ]
+
     if existing_messages:
         if existing_messages[0].get("role") == "system":
             existing_messages[0] = system_msg
         else:
             existing_messages.insert(0, system_msg)
-        existing_messages.append({"role": "user", "content": state.prompt})
+        existing_messages.append(user_msg)
         updated_messages = existing_messages
     else:
         updated_messages = [
             system_msg,
-            {"role": "user", "content": state.prompt}
+            user_msg
         ]
 
     return {
@@ -204,7 +214,6 @@ def infer_node(state: WorkbenchState) -> dict:
 
     model_tag = MODEL_REGISTRY.get(role, MODEL_REGISTRY["reasoning"])
     
-    # Pass images only on first infer_node iteration
     images = None
     if state.tool_iteration_count == 0 and state.file_metadata:
         for fm in state.file_metadata:
@@ -228,7 +237,6 @@ def infer_node(state: WorkbenchState) -> dict:
     raw_calls = msg_dict.get("tool_calls", []) or []
     content = msg_dict.get("content", "")
 
-    # Ensure every tool call has a unique 'id' field to match subsequent 'tool' role messages for Ollama API
     fixed_calls = []
     for call in raw_calls:
         if isinstance(call, dict):
@@ -243,7 +251,6 @@ def infer_node(state: WorkbenchState) -> dict:
     if raw_calls:
         msg_dict["tool_calls"] = raw_calls
 
-    # Fallback parsing for text JSON tool calls
     if not raw_calls and content:
         fallback_call = parse_json_tool_call(content)
         if fallback_call:
@@ -319,7 +326,6 @@ def tool_node(state: WorkbenchState) -> dict:
 
         tool_result = None
 
-        # Stage 1: Unknown Tool Name
         if tool_name not in TOOL_REGISTRY:
             tool_result = ToolResult(
                 status=ToolStatus.ERROR,
@@ -327,7 +333,6 @@ def tool_node(state: WorkbenchState) -> dict:
                 metadata={"failure_type": "unknown_tool", "tool_name": tool_name}
             )
         else:
-            # Stage 2: Argument Validation
             input_cls = TOOL_INPUT_TYPES[tool_name]
             validated_input = None
             try:
@@ -342,7 +347,6 @@ def tool_node(state: WorkbenchState) -> dict:
                     metadata={"failure_type": "invalid_args", "tool_name": tool_name}
                 )
 
-            # Stage 3: Execution
             if validated_input is not None:
                 try:
                     target_session_id = (isinstance(raw_args, dict) and raw_args.get("session_id")) or session_id
@@ -359,7 +363,6 @@ def tool_node(state: WorkbenchState) -> dict:
 
         accumulated_results.append(tool_result)
 
-        # Append tool message back to state history
         tool_msg = {
             "role": "tool",
             "content": tool_result.model_dump_json(),
@@ -402,6 +405,29 @@ def build_orchestrator_graph():
     return builder
 
 
+def save_messages_to_postgres(thread_id: str, messages: List[Dict[str, Any]]):
+    """Saves human-readable chat messages into PostgreSQL messages table."""
+    try:
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content", "")
+            if role == "system":
+                continue
+            sender = "user" if role == "user" else ("assistant" if role == "assistant" else "tool")
+            tool_calls = json.dumps(msg.get("tool_calls")) if msg.get("tool_calls") else None
+            tool_name = msg.get("tool_call_id") if role == "tool" else None
+            execute_query(
+                """
+                INSERT INTO messages (thread_id, sender, content, tool_calls, tool_name)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (thread_id, sender, str(content), tool_calls, tool_name),
+                commit=True
+            )
+    except Exception as e:
+        logger.error(f"Error saving messages to PostgreSQL: {e}")
+
+
 def run_workbench(
     prompt: str,
     file_metadata: Optional[List[FileMetadata]] = None,
@@ -409,13 +435,14 @@ def run_workbench(
     max_tool_iterations: int = 5,
     thinking: bool = True
 ) -> Tuple[Dict[str, Any], str]:
-    """Runs a complete workbench execution turn synchronously inside SqliteSaver context."""
+    """Runs a complete workbench execution turn synchronously inside PostgresSaver context."""
     selected_thread_id = thread_id or str(uuid4())
     config = {"configurable": {"thread_id": selected_thread_id}}
 
     builder = build_orchestrator_graph()
 
-    with SqliteSaver.from_conn_string(DB_FILENAME) as checkpointer:
+    with PostgresSaver.from_conn_string(get_db_url()) as checkpointer:
+        checkpointer.setup()
         graph = builder.compile(checkpointer=checkpointer)
         snapshot = graph.get_state(config)
         existing_values = snapshot.values or {}
@@ -429,5 +456,16 @@ def run_workbench(
             thinking=thinking
         )
         final_state = graph.invoke(initial_state, config=config)
+
+    # Ensure thread entry exists in threads table
+    try:
+        from tools.rbac import link_thread_to_user
+        link_thread_to_user(selected_thread_id, "admin")
+    except Exception:
+        pass
+
+    # Save messages to PostgreSQL messages table
+    final_messages = final_state.get("messages", []) if isinstance(final_state, dict) else getattr(final_state, "messages", [])
+    save_messages_to_postgres(selected_thread_id, final_messages)
 
     return final_state, selected_thread_id

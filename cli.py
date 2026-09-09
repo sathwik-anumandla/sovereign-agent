@@ -72,13 +72,9 @@ def execute_prompt(prompt_text: str, file_path: Optional[str] = None, thread_id:
         method = getattr(route_dec, "method", None) or (route_dec.get("method") if isinstance(route_dec, dict) else "N/A")
         conf = getattr(route_dec, "confidence", None) or (route_dec.get("confidence") if isinstance(route_dec, dict) else 1.0)
 
-        model_map = {
-            "reasoning": "qwen3.5:4b-q4_K_M",
-            "coding": "qwen2.5-coder:3b",
-            "vision": "qwen3.5:4b-q4_K_M",
-            "ocr": "qwen2.5-vl:3b"
-        }
-        model_name = model_map.get(str(role).lower(), "qwen3.5:4b-q4_K_M")
+        from config_loader import get_model_registry
+        model_map = get_model_registry()
+        model_name = model_map.get(str(role).lower(), model_map.get("reasoning", "N/A"))
 
         print("\n[ROUTER DECISION]")
         print(f"  • Assigned Role : {role} ({model_name})")

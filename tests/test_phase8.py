@@ -6,7 +6,7 @@ Executes:
 1. Standalone document ingestion (text docs & OCR PDF routing).
 2. Standalone rag_kb query verification (top-k structure, metadata, scores).
 3. Overwrite re-ingestion safety test (no stale trailing chunks).
-4. Deletion pipeline test (Chroma deletion & disk copy removal).
+4. Deletion pipeline test (pgvector deletion & disk copy removal).
 5. ReAct orchestrator end-to-end tool calling & source citation verification.
 """
 
@@ -20,9 +20,10 @@ sys.path.insert(0, ROOT_DIR)
 from tool_interface import ToolStatus
 from tools.rag_kb import (
     rag_kb, RagKbInput, ingest_document, delete_document, 
-    get_reference_files, get_chroma_collection, REFERENCE_FILES_DIR
+    get_reference_files, REFERENCE_FILES_DIR
 )
 from orchestrator import run_workbench, WorkbenchState
+from tools.db import execute_query
 
 
 def test_standalone_ingestion_and_metadata():
@@ -30,7 +31,6 @@ def test_standalone_ingestion_and_metadata():
     print("[TEST 1] STANDALONE DOCUMENT INGESTION & METADATA CHECK")
     print("=" * 75)
 
-    # Create dummy text document for test
     test_doc_path = Path(ROOT_DIR) / "workspace" / "mrpl_hcu_manual.txt"
     test_doc_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -45,21 +45,18 @@ Catalyst regeneration cycle is set for every 24 months of continuous refinery op
     with open(test_doc_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    # Ingest text document
     res_text = ingest_document(str(test_doc_path))
     assert res_text["status"] == "success", f"Ingestion failed: {res_text}"
     assert res_text["source"] == "mrpl_hcu_manual.txt"
     assert res_text["chunks_ingested"] >= 1, f"Expected chunks >= 1, got {res_text['chunks_ingested']}"
     print(f"[PASS] Text Document Ingested: {res_text['source']} ({res_text['chunks_ingested']} chunks).")
 
-    # Ingest OCR document (test-1.pdf if available)
     ocr_doc = Path(ROOT_DIR) / "ignore-files" / "ocr-test" / "test-1.pdf"
     if ocr_doc.exists():
         res_ocr = ingest_document(str(ocr_doc))
         assert res_ocr["status"] == "success", f"OCR PDF ingestion failed: {res_ocr}"
         print(f"[PASS] OCR PDF Document Ingested: {res_ocr['source']} ({res_ocr['chunks_ingested']} chunks).")
 
-    # Check live reference file list
     ref_files = get_reference_files()
     assert len(ref_files) >= 1, f"Expected reference files >= 1, got {len(ref_files)}"
     sources = [f["source"] for f in ref_files]
@@ -103,7 +100,6 @@ def test_overwrite_reingestion_safety():
     test_file = Path(ROOT_DIR) / "workspace" / "reingest_test.txt"
     test_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Initial version with 3 long paragraphs (3 chunks)
     v1_text = """Paragraph 1: Initial telemetry data for MRPL Crude Distillation Unit (CDU-1). Pressure level 45 bar. Temperature 310 C.
 
 Paragraph 2: Flow rate monitored at 12,000 barrels per day. Valve V-401 operating at 85% open state.
@@ -114,24 +110,22 @@ Paragraph 3: Secondary heat exchanger efficiency rated at 92.4%. Water injection
         f.write(v1_text)
 
     ingest_document(str(test_file))
-    collection = get_chroma_collection()
-    initial_chunks = collection.get(where={"source": "reingest_test.txt"})
-    count_v1 = len(initial_chunks["ids"])
+    initial_chunks = execute_query("SELECT content FROM rag_embeddings WHERE source_filename = %s", ("reingest_test.txt",), fetch_all=True) or []
+    count_v1 = len(initial_chunks)
     print(f"Version 1 Ingested Chunks Count: {count_v1}")
 
-    # Shorter Version 2 with only 1 paragraph
     v2_text = "Paragraph 1: Updated single paragraph for CDU-1. All other systems offline for overhaul."
     with open(test_file, "w", encoding="utf-8") as f:
         f.write(v2_text)
 
     ingest_document(str(test_file))
-    updated_chunks = collection.get(where={"source": "reingest_test.txt"})
-    count_v2 = len(updated_chunks["ids"])
+    updated_chunks = execute_query("SELECT content FROM rag_embeddings WHERE source_filename = %s", ("reingest_test.txt",), fetch_all=True) or []
+    count_v2 = len(updated_chunks)
     print(f"Version 2 Overwritten Chunks Count: {count_v2}")
 
     assert count_v2 < count_v1, f"Expected updated chunk count ({count_v2}) < initial count ({count_v1})"
     assert count_v2 == 1, f"Expected exactly 1 chunk after overwrite, got {count_v2}"
-    assert "Updated single paragraph" in updated_chunks["documents"][0], "Expected updated document content"
+    assert "Updated single paragraph" in updated_chunks[0][0], "Expected updated document content"
     print("[PASS] Re-ingestion successfully replaced old chunks without stale residue.")
 
 
@@ -144,14 +138,13 @@ def test_deletion_pipeline():
     success = delete_document(del_file)
     assert success, "delete_document returned False"
 
-    collection = get_chroma_collection()
-    chunks = collection.get(where={"source": del_file})
-    assert len(chunks["ids"]) == 0, f"Expected 0 chunks in Chroma after deletion, found {len(chunks['ids'])}"
+    chunks = execute_query("SELECT content FROM rag_embeddings WHERE source_filename = %s", (del_file,), fetch_all=True) or []
+    assert len(chunks) == 0, f"Expected 0 chunks in PostgreSQL after deletion, found {len(chunks)}"
 
     ref_copy = REFERENCE_FILES_DIR / del_file
     assert not ref_copy.exists(), f"Reference copy still exists on disk: {ref_copy}"
 
-    print(f"[PASS] Document '{del_file}' deleted from ChromaDB and disk reference directory.")
+    print(f"[PASS] Document '{del_file}' deleted from PostgreSQL pgvector and disk reference directory.")
 
 
 def test_react_orchestrator_rag_kb_tool_call():

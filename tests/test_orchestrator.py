@@ -14,7 +14,7 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
 
 from router.schemas import FileMetadata
-from orchestrator import run_workbench, DB_FILENAME
+from orchestrator import run_workbench
 try:
     from scripts.inspect_run import inspect_thread, list_recent_thread_ids
 except ImportError:
@@ -106,15 +106,14 @@ def test_phase5_orchestrator_skeleton():
     inspect_thread(custom_thread_id)
 
     # Test Case 7: Database Thread List & Process Persistence
-    print("\n[Test 7] Verifying SQLite Checkpoint Database Persistence...")
-    assert Path(DB_FILENAME).exists(), f"Database '{DB_FILENAME}' must exist on disk"
+    print("\n[Test 7] Verifying PostgreSQL Checkpoint Database Persistence...")
     recent_threads = list_recent_thread_ids(0)
-    print(f"Recent SQLite Thread IDs ({len(recent_threads)} found):")
+    print(f"Recent PostgreSQL Thread IDs ({len(recent_threads)} found):")
     for tid in recent_threads[:5]:
         print(f"  - {tid}")
 
-    assert custom_thread_id in recent_threads, f"Thread {custom_thread_id} must persist in SQLite"
-    print("[PASS] Test 7: Database contains all persistent thread checkpoints.")
+    assert custom_thread_id in recent_threads, f"Thread {custom_thread_id} must persist in PostgreSQL"
+    print("[PASS] Test 7: PostgreSQL database contains all persistent thread checkpoints.")
 
     # Test Case 8: Image File Metadata Passing in infer_node
     print("\n[Test 8] Verifying Image File Metadata Inspection in infer_node...")

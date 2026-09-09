@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import AdminPanelModal from './components/AdminPanelModal';
+import AdminDashboardView from './components/AdminDashboardView';
 import LoginScreen from './components/LoginScreen';
+import TwoFactorAuthModal from './components/TwoFactorAuthModal';
 
 const API_BASE = 'http://localhost:8000';
 
@@ -18,10 +20,12 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
   const [routeDecision, setRouteDecision] = useState(null);
+  const [modelConfig, setModelConfig] = useState(null);
   const [isThinkingMode, setIsThinkingMode] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem('workbench_theme') || 'dark');
   const [showKbModal, setShowKbModal] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
+  const [show2faModal, setShow2faModal] = useState(false);
 
   const [users, setUsers] = useState([]);
 
@@ -60,6 +64,7 @@ export default function App() {
           await fetchUsers(token);
         }
         await loadThreads(user.user_id, false, token);
+        await fetchModelConfig(token);
       } else {
         localStorage.removeItem('workbench_token');
         setToken(null);
@@ -87,6 +92,21 @@ export default function App() {
     }
   };
 
+  const fetchModelConfig = async (authToken = token) => {
+    if (!authToken) return;
+    try {
+      const res = await fetch(`${API_BASE}/config/models`, {
+        headers: { Authorization: `Bearer ${authToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setModelConfig(data);
+      }
+    } catch (err) {
+      console.error('Error fetching model config:', err);
+    }
+  };
+
   const handleLoginSuccess = async (newToken, userProfile) => {
     localStorage.setItem('workbench_token', newToken);
     setToken(newToken);
@@ -95,6 +115,7 @@ export default function App() {
       await fetchUsers(newToken);
     }
     await loadThreads(userProfile.user_id, false, newToken);
+    await fetchModelConfig(newToken);
   };
 
   const handleLogout = () => {
@@ -213,10 +234,12 @@ export default function App() {
               currentAssistantTurn = null;
             }
 
-            if (msg.content) {
+            const attachedFiles = msg.attachedFiles || msg.attached_files || msg.files || (uiMessages.length === 0 ? (data.files || []) : []);
+            if (msg.content || (attachedFiles && attachedFiles.length > 0)) {
               uiMessages.push({
                 role: 'user',
-                content: msg.content
+                content: msg.content,
+                attachedFiles: attachedFiles
               });
             }
           } else if (msg.role === 'assistant') {
@@ -324,7 +347,7 @@ export default function App() {
     return null;
   };
 
-  const handleSendMessage = async (content, fileIds, attachedFiles) => {
+  const handleSendMessage = async (content, fileIds, attachedFiles, modelOverride = 'auto') => {
     if (!activeThreadId || isStreaming || !token) return;
 
     setConnectionError(null);
@@ -345,7 +368,18 @@ export default function App() {
     let currentAssistantText = '';
     let activeTools = [];
     let dynamicPlanSteps = [];
-    let activeRouteDecision = null;
+
+    const modelTag = modelConfig?.models?.[modelOverride]?.tag || modelConfig?.options?.find(o => o.id === modelOverride)?.model_tag;
+    const initialRouteDecision = (modelOverride && modelOverride !== 'auto')
+      ? {
+          role: modelOverride,
+          model: modelTag || (modelOverride === 'coding' ? 'qwen2.5-coder:3b' : 'qwen3.5:4b-q4_K_M'),
+          method: 'manual_override'
+        }
+      : null;
+
+    let activeRouteDecision = initialRouteDecision;
+    setRouteDecision(initialRouteDecision);
 
     try {
       const response = await fetch(`${API_BASE}/threads/${activeThreadId}/messages`, {
@@ -357,7 +391,9 @@ export default function App() {
         body: JSON.stringify({
           content: content,
           file_ids: fileIds,
-          thinking: isThinkingMode
+          files: attachedFiles,
+          thinking: isThinkingMode,
+          model_override: modelOverride
         })
       });
 
@@ -494,6 +530,21 @@ export default function App() {
     return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
   }
 
+  if (currentUser.role === 'admin') {
+    return (
+      <AdminDashboardView
+        currentUser={currentUser}
+        token={token}
+        onLogout={handleLogout}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+      />
+    );
+  }
+
+  const activeThreadObj = threads.find((t) => t.thread_id === activeThreadId);
+  const activeThreadTitle = activeThreadObj ? (activeThreadObj.title || activeThreadObj.preview || activeThreadObj.first_prompt) : 'Sovereign Agent';
+
   return (
     <div className="flex h-screen w-screen overflow-hidden app-bg">
       <Sidebar
@@ -504,6 +555,7 @@ export default function App() {
         onDeleteThread={handleDeleteThread}
         onOpenKbModal={() => setShowKbModal(true)}
         onOpenAdminModal={() => setShowAdminModal(true)}
+        onOpen2faModal={() => setShow2faModal(true)}
         currentUser={currentUser}
         onLogout={handleLogout}
         isOpen={isSidebarOpen}
@@ -514,6 +566,7 @@ export default function App() {
       />
       <ChatWindow
         activeThreadId={activeThreadId}
+        activeThreadTitle={activeThreadTitle}
         messages={messages}
         toolCallsMap={toolCallsMap}
         isStreaming={isStreaming}
@@ -530,11 +583,18 @@ export default function App() {
         showKbModal={showKbModal}
         onCloseKbModal={() => setShowKbModal(false)}
         token={token}
+        modelConfig={modelConfig}
       />
       <AdminPanelModal
         isOpen={showAdminModal}
         onClose={() => setShowAdminModal(false)}
         token={token}
+      />
+      <TwoFactorAuthModal
+        isOpen={show2faModal}
+        onClose={() => setShow2faModal(false)}
+        token={token}
+        currentUser={currentUser}
       />
     </div>
   );

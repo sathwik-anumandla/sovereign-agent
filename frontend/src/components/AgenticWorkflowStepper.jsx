@@ -12,6 +12,7 @@ const TOOL_LABELS = {
 };
 
 export default function AgenticWorkflowStepper({ 
+  activeThreadId,
   routeDecision, 
   planSteps = [],
   toolCalls = [], 
@@ -46,8 +47,8 @@ export default function AgenticWorkflowStepper({
     setExpandedTools((prev) => ({ ...prev, [idx]: !prev[idx] }));
   };
 
-  const modelRole = routeDecision?.role || 'reasoning';
-  const selectedModel = routeDecision?.selected_model || 'qwen3.5:4b-q4_K_M';
+  const modelRole = routeDecision?.role;
+  const selectedModel = routeDecision?.model || routeDecision?.selected_model || (modelRole === 'coding' ? 'qwen2.5-coder:3b' : 'qwen3.5:4b-q4_K_M');
   const hasTools = toolCalls.length > 0;
 
   const displayDuration = (durationSeconds !== null && durationSeconds !== undefined)
@@ -84,13 +85,21 @@ export default function AgenticWorkflowStepper({
       {/* Expanded Real-Time Text List (No Numbers, No Cards, Plain Muted Font) */}
       {isExpanded && (
         <div className="mt-2.5 ml-1 space-y-2 border-l border-[var(--border-muted)] pl-3 text-sm theme-text-muted font-mono">
-          <div>
-            Prompt routed to '{modelRole}' model
-          </div>
+          {modelRole ? (
+            <>
+              <div>
+                Prompt routed to '{modelRole}' model
+              </div>
 
-          <div>
-            Loading {selectedModel} into memory...
-          </div>
+              <div>
+                Loading {selectedModel} into memory...
+              </div>
+            </>
+          ) : (
+            <div>
+              Evaluating router & selecting model...
+            </div>
+          )}
 
           {/* Plain Text Expandable Tool Calls */}
           {hasTools && toolCalls.map((tc, idx) => {
@@ -99,11 +108,21 @@ export default function AgenticWorkflowStepper({
 
             let filename = null;
             if (tc.raw_output) {
-              const meta = tc.raw_output.metadata || {};
-              const pathStr = meta.output_path || meta.path;
-              if (pathStr && typeof pathStr === 'string' && /\.(docx|pptx|ppt|xlsx|csv|pdf|png|txt)$/i.test(pathStr)) {
-                filename = pathStr.split('/').pop().split('\\').pop();
+              const rawObj = typeof tc.raw_output === 'object' ? tc.raw_output : {};
+              const meta = rawObj.metadata || rawObj;
+              const genFiles = meta.generated_files || rawObj.generated_files || [];
+              if (Array.isArray(genFiles) && genFiles.length > 0) {
+                filename = genFiles[0];
+              } else {
+                const pathStr = meta.output_path || meta.path || rawObj.output_path || rawObj.path;
+                if (pathStr && typeof pathStr === 'string' && /\.(docx|pptx|ppt|xlsx|csv|pdf|png|txt)$/i.test(pathStr)) {
+                  filename = pathStr.split('/').pop().split('\\').pop();
+                }
               }
+            }
+            if (!filename && tc.output_summary && typeof tc.output_summary === 'string') {
+              const match = tc.output_summary.match(/'([^']+\.(?:docx|pptx|ppt|xlsx|csv|pdf|png|txt))'/i);
+              if (match) filename = match[1];
             }
 
             return (
@@ -129,7 +148,7 @@ export default function AgenticWorkflowStepper({
                     {filename && (
                       <div className="pt-0.5">
                         <a
-                          href={`http://localhost:8000/workspace/default_session/files/${filename}`}
+                          href={`http://localhost:8000/workspace/${activeThreadId || 'default_session'}/files/${filename}`}
                           download
                           target="_blank"
                           rel="noopener noreferrer"

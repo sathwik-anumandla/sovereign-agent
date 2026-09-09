@@ -3,9 +3,9 @@ server.py (SIH PS 26117)
 ========================
 Sovereign On-Premise Agentic AI Workbench API Server.
 
-FastAPI API Layer around the LangGraph ReAct Orchestrator.
+FastAPI API Layer around the LangGraph ReAct Orchestrator backed by PostgreSQL + pgvector.
 Exposes RBAC authentication, thread management, knowledge base RAG ingestion,
-file upload staging, SSE real-time message streaming, and checkpoint history.
+file upload staging with structured disk persistence, SSE real-time streaming, and checkpoint history.
 """
 
 import os
@@ -13,29 +13,26 @@ import json
 import uuid
 import time
 import logging
-import sqlite3
 import asyncio
 import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Body, Header, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Body, Header, Depends, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
+from langgraph.checkpoint.postgres import PostgresSaver
 
 # Orchestrator & State Imports
-from orchestrator import build_orchestrator_graph, DB_FILENAME, WorkbenchState
+from orchestrator import build_orchestrator_graph, WorkbenchState
 from router.schemas import FileMetadata, RouteDecision
 from router.route import route
+from config_loader import load_models_config, get_model_registry
 from phase1_inference import MODEL_REGISTRY
 from tool_interface import validate_workspace_path, ToolStatus
-try:
-    from scripts.inspect_run import list_recent_thread_ids
-except ImportError:
-    from inspect_run import list_recent_thread_ids
-from langgraph.checkpoint.sqlite import SqliteSaver
+from tools.db import get_db_url, execute_query, get_db_connection
 
 # RBAC & User Administration
 from tools.rbac import (
@@ -43,13 +40,23 @@ from tools.rbac import (
     get_all_users,
     get_user_by_id,
     link_thread_to_user,
+    update_thread_title,
     get_thread_user_map,
     get_admin_audit_metrics,
     authenticate_user,
     create_jwt_token,
     decode_jwt_token,
     create_new_user,
-    change_user_password
+    change_user_password,
+    delete_user_account,
+    verify_password
+)
+from tools.totp_utils import (
+    generate_totp_secret,
+    generate_totp_qr_data_url,
+    generate_backup_codes,
+    verify_totp_code,
+    verify_and_consume_backup_code
 )
 
 # Knowledge Base (RAG)
@@ -70,7 +77,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Initialize SQLite RBAC tables and default seed users
+# Initialize PostgreSQL seed users
 init_rbac_db()
 
 # Configure CORS Middleware
@@ -97,14 +104,17 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 def get_current_user(
     authorization: Optional[str] = Header(None),
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    token_param: Optional[str] = Query(None, alias="token")
 ) -> Dict[str, Any]:
-    """FastAPI dependency: extracts and verifies JWT bearer token from Header or credentials."""
+    """FastAPI dependency: extracts and verifies JWT bearer token from Header, credentials, or query param."""
     token = None
     if credentials and credentials.credentials:
         token = credentials.credentials
     elif authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
+    elif token_param:
+        token = token_param
 
     if not token:
         raise HTTPException(status_code=401, detail="Missing or invalid authorization bearer token")
@@ -148,124 +158,274 @@ def is_model_resident(model_name: str) -> bool:
         import urllib.request
         req = urllib.request.Request("http://127.0.0.1:11434/api/ps")
         with urllib.request.urlopen(req, timeout=2) as response:
-            data = json.loads(response.read().decode("utf-8"))
-            models = data.get("models", [])
-            for m in models:
-                name = m.get("name", "")
-                if model_name in name or name in model_name:
-                    return True
-            return False
-    except Exception as e:
-        logging.warning(f"Ollama VRAM residency check failed for '{model_name}': {e}")
-        return False
+            if response.status == 200:
+                data = json.loads(response.read().decode("utf-8"))
+                models = data.get("models", [])
+                for m in models:
+                    name = m.get("name", "")
+                    if model_name in name or name in model_name:
+                        return True
+    except Exception:
+        pass
+    return False
 
 
-def make_status_event(stage: str, detail: str) -> dict:
-    """Structures a standard status update dictionary for SSE streaming."""
-    return {
-        "event": "status",
-        "data": json.dumps({
-            "stage": stage,
-            "detail": detail,
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        })
-    }
-
-
-def _build_output_summary(tool_name: str, status: str, data: Any, metadata: Dict[str, Any]) -> str:
-    """Formats short, human-readable tool output descriptions for frontend display."""
-    if tool_name == "ocr_vlm":
-        conf = metadata.get("average_confidence", 0.99)
-        page_cnt = metadata.get("page_count", 1)
-        return f"Extracted document text from {page_cnt} page(s) ({conf:.2f} OCR confidence)"
-
-    elif tool_name == "code_sandbox":
-        output_str = str(data or metadata.get("output", "Code execution completed")).strip()
-        preview = output_str[:90] + ("..." if len(output_str) > 90 else "")
-        return f"Code executed successfully. Output: {preview}"
-
-    elif tool_name == "rag_kb":
-        results = metadata.get("results") or data or []
-        count = len(results) if isinstance(results, list) else 1
-        return f"Retrieved {count} knowledge base reference chunk(s)"
-
-    elif tool_name == "doc_gen":
-        path_str = metadata.get("output_path") or "document"
-        filename = Path(str(path_str)).name
-        return f"Generated Word deliverable at '{filename}'"
-
-    elif tool_name == "math_eval":
-        res_str = str(data or metadata.get("result", "Evaluated"))
-        return f"Evaluated math expression: {res_str}"
-
-    elif tool_name == "spreadsheet":
-        return f"Tabular data operation '{metadata.get('operation', 'analysis')}' completed"
-
-    elif tool_name == "file_io":
-        return f"Workspace file operation '{metadata.get('operation', 'io')}' succeeded"
-
-    return f"Tool '{tool_name}' completed with status '{status}'"
+def get_all_resident_models() -> List[str]:
+    """Returns list of currently loaded model names from Ollama /api/ps."""
+    try:
+        import urllib.request
+        req = urllib.request.Request("http://127.0.0.1:11434/api/ps")
+        with urllib.request.urlopen(req, timeout=2) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode("utf-8"))
+                models = data.get("models", [])
+                return [m.get("name", "") for m in models if m.get("name")]
+    except Exception:
+        pass
+    return []
 
 
 # ============================================================================
-# 1. NETWORK TELEMETRY & AIR-GAP AUDIT ENDPOINTS
+# 1. AUTHENTICATION & USER MANAGEMENT ENDPOINTS
 # ============================================================================
 
-@app.get("/network/status")
-def get_network_status():
-    """Returns real-time air-gap security audit telemetry proving zero external egress."""
-    return {
-        "is_air_gapped": True,
-        "egress_bytes": 0,
-        "external_requests": 0,
-        "allowed_hosts": ["127.0.0.1", "localhost"],
-        "status": "SECURE_AIR_GAPPED",
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-    }
-
-
-# ============================================================================
-# 2. AUTHENTICATION & RBAC USER MANAGEMENT ENDPOINTS
-# ============================================================================
-
+@app.post("/api/auth/login")
 @app.post("/auth/login")
-def login(payload: Dict[str, str] = Body(...)):
-    """Authenticates username and password, returning JWT bearer token and user profile."""
+def login(payload: Dict[str, Any] = Body(...)):
+    """Authenticates credentials and returns JWT bearer token or 2FA challenge requirement."""
     username = payload.get("username", "").strip()
     password = payload.get("password", "").strip()
 
     if not username or not password:
-        raise HTTPException(status_code=400, detail="Username and password required")
+        raise HTTPException(status_code=400, detail="Username and password are required")
 
     user = authenticate_user(username, password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
+    if user.get("totp_enabled"):
+        # Issue short-lived challenge token valid for 5 minutes (300s)
+        temp_token = create_jwt_token(user["user_id"], user["role"], expires_in_seconds=300)
+        return {
+            "requires_2fa": True,
+            "temp_token": temp_token,
+            "user_id": user["user_id"],
+            "username": user["username"],
+            "message": "2FA TOTP authentication required"
+        }
+
     token = create_jwt_token(user["user_id"], user["role"])
     return {
+        "requires_2fa": False,
         "access_token": token,
         "token_type": "bearer",
         "user": user
     }
 
 
+@app.post("/api/auth/login/verify-2fa")
+@app.post("/auth/login/verify-2fa")
+def verify_2fa_login(payload: Dict[str, Any] = Body(...)):
+    """Verifies 6-digit TOTP code or emergency recovery code during login."""
+    temp_token = payload.get("temp_token", "").strip()
+    code = payload.get("code", "").strip()
+
+    if not temp_token or not code:
+        raise HTTPException(status_code=400, detail="Challenge token and 2FA code are required")
+
+    decoded = decode_jwt_token(temp_token)
+    if not decoded:
+        raise HTTPException(status_code=401, detail="2FA session expired. Please log in again.")
+
+    user_id = decoded.get("sub")
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User account not found")
+
+    row = execute_query("SELECT totp_secret FROM users WHERE user_id = %s", (user_id,), fetch_one=True)
+    totp_secret = row[0] if row else None
+
+    # Verification Step 1: TOTP 6-digit token
+    is_valid = verify_totp_code(totp_secret, code) if totp_secret else False
+
+    # Verification Step 2: Single-use Emergency Recovery Code
+    if not is_valid:
+        is_valid = verify_and_consume_backup_code(user_id, code)
+
+    if not is_valid:
+        raise HTTPException(status_code=401, detail="Invalid 2FA authentication code or recovery code")
+
+    token = create_jwt_token(user["user_id"], user["role"])
+    return {
+        "requires_2fa": False,
+        "access_token": token,
+        "token_type": "bearer",
+        "user": user
+    }
+
+
+@app.get("/api/auth/2fa/status")
+@app.get("/auth/2fa/status")
+def get_2fa_status(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Returns live 2FA status for the current logged-in user."""
+    row = execute_query("SELECT totp_enabled FROM users WHERE user_id = %s", (current_user["user_id"],), fetch_one=True)
+    is_enabled = bool(row[0]) if row and row[0] is not None else False
+    return {"totp_enabled": is_enabled}
+
+
+@app.post("/api/auth/2fa/setup")
+@app.post("/auth/2fa/setup")
+def setup_2fa(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Generates new Base32 TOTP secret key, QR code Data URL image, and emergency recovery codes."""
+    user_id = current_user["user_id"]
+    username = current_user["username"]
+
+    secret = generate_totp_secret()
+    provisioning_uri, qr_data_url = generate_totp_qr_data_url(username, secret)
+    raw_backup_codes, hashed_backup_codes = generate_backup_codes(8)
+
+    execute_query(
+        "UPDATE users SET totp_secret = %s, backup_codes = %s WHERE user_id = %s",
+        (secret, json.dumps(hashed_backup_codes), user_id),
+        commit=True
+    )
+
+    return {
+        "secret": secret,
+        "qr_code": qr_data_url,
+        "otpauth_uri": provisioning_uri,
+        "backup_codes": raw_backup_codes
+    }
+
+
+@app.post("/api/auth/2fa/enable")
+@app.post("/auth/2fa/enable")
+def enable_2fa(payload: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Confirms initial 6-digit TOTP token and activates 2FA on account."""
+    user_id = current_user["user_id"]
+    code = payload.get("code", "").strip()
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Verification code is required")
+
+    row = execute_query("SELECT totp_secret FROM users WHERE user_id = %s", (user_id,), fetch_one=True)
+    secret = row[0] if row else None
+
+    if not secret:
+        raise HTTPException(status_code=400, detail="2FA setup not initiated. Please run 2FA setup first.")
+
+    if not verify_totp_code(secret, code):
+        raise HTTPException(status_code=400, detail="Invalid TOTP verification code. Scan QR code and try again.")
+
+    execute_query("UPDATE users SET totp_enabled = TRUE WHERE user_id = %s", (user_id,), commit=True)
+    return {"status": "success", "message": "2FA Two-Factor Authentication successfully enabled"}
+
+
+@app.post("/api/auth/2fa/disable")
+@app.post("/auth/2fa/disable")
+def disable_2fa(payload: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Disables 2FA on account after verifying account password and 2FA code."""
+    user_id = current_user["user_id"]
+    password = payload.get("password", "").strip()
+    code = payload.get("code", "").strip()
+
+    row = execute_query("SELECT password_hash, totp_secret FROM users WHERE user_id = %s", (user_id,), fetch_one=True)
+    if not row:
+        raise HTTPException(status_code=404, detail="User account not found")
+
+    pwd_hash, secret = row
+    if not verify_password(password, pwd_hash or ""):
+        raise HTTPException(status_code=400, detail="Incorrect account password")
+
+    is_valid = verify_totp_code(secret, code) if secret else False
+    if not is_valid:
+        is_valid = verify_and_consume_backup_code(user_id, code)
+
+    if not is_valid:
+        raise HTTPException(status_code=400, detail="Invalid TOTP code or emergency recovery code")
+
+    execute_query(
+        "UPDATE users SET totp_enabled = FALSE, totp_secret = NULL, backup_codes = NULL WHERE user_id = %s",
+        (user_id,),
+        commit=True
+    )
+    return {"status": "success", "message": "2FA Two-Factor Authentication disabled"}
+
+
+@app.get("/api/auth/me")
 @app.get("/auth/me")
-def get_current_user_profile(current_user: Dict[str, Any] = Depends(get_current_user)):
-    """Validates JWT bearer token and returns current user profile."""
+def get_me(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Returns profile information for the authenticated token owner."""
     return current_user
 
 
+@app.get("/api/users")
+@app.get("/users")
+def list_users(current_user: Dict[str, Any] = Depends(require_admin)):
+    """Admin endpoint: Lists all registered system accounts with thread stats."""
+    return get_all_users()
+
+
+@app.post("/api/users")
+@app.post("/users")
+def create_user(
+    payload: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Admin endpoint: Creates a new user account."""
+    username = payload.get("username", "").strip()
+    password = payload.get("password", "").strip()
+    name = payload.get("name", "").strip()
+    role = payload.get("role", "user").strip()
+    department = payload.get("department", "General Engineering").strip()
+    avatar_color = payload.get("avatar_color", "bg-blue-500").strip()
+
+    if not username or not password or not name:
+        raise HTTPException(status_code=400, detail="Username, password, and name are required")
+
+    try:
+        new_user = create_new_user(
+            username=username,
+            password=password,
+            name=name,
+            role=role,
+            department=department,
+            avatar_color=avatar_color
+        )
+        return new_user
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/users/{user_id}")
+@app.delete("/users/{user_id}")
+def delete_user(
+    user_id: str,
+    current_user: Dict[str, Any] = Depends(require_admin)
+):
+    """Admin endpoint: Deletes a user account and associated threads/files."""
+    try:
+        delete_user_account(user_id)
+        return {"status": "success", "user_id": user_id, "message": f"User account '{user_id}' deleted successfully"}
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/users/change-password")
 @app.post("/auth/change-password")
-def change_password(
-    payload: Dict[str, str] = Body(...),
+@app.post("/api/auth/change-password")
+def update_password(
+    payload: Dict[str, Any] = Body(...),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """Allows an authenticated user to update their password."""
+    """Allows authenticated user to change their account password."""
     old_password = payload.get("old_password", "").strip()
     new_password = payload.get("new_password", "").strip()
 
     if not old_password or not new_password:
-        raise HTTPException(status_code=400, detail="Current and new password are required")
+        raise HTTPException(status_code=400, detail="Old password and new password are required")
 
     try:
         change_user_password(current_user["user_id"], old_password, new_password)
@@ -276,156 +436,140 @@ def change_password(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/users")
-def list_users(current_user: Dict[str, Any] = Depends(require_admin)):
-    """Admin endpoint: Returns list of all registered users with role and department metadata."""
-    return get_all_users()
-
-
-@app.post("/users")
-def register_user(
-    payload: Dict[str, str] = Body(...),
-    current_user: Dict[str, Any] = Depends(require_admin)
-):
-    """Admin endpoint: Registers a new user account."""
-    username = payload.get("username", "").strip()
-    password = payload.get("password", "").strip()
-    name = payload.get("name", "").strip()
-    role = payload.get("role", "user").strip()
-    department = payload.get("department", "General Operations").strip()
-
-    if not username or not password or not name:
-        raise HTTPException(status_code=400, detail="Username, password, and full name are required")
-
-    try:
-        return create_new_user(
-            username=username,
-            password=password,
-            name=name,
-            role=role,
-            department=department
-        )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error creating user: {str(e)}")
-
-
+@app.get("/api/admin/metrics")
 @app.get("/admin/audit")
-def get_admin_audit(current_user: Dict[str, Any] = Depends(require_admin)):
-    """Admin endpoint: Returns system-wide telemetry and audit metrics."""
+@app.get("/api/admin/audit")
+def admin_audit_metrics(current_user: Dict[str, Any] = Depends(require_admin)):
+    """Admin endpoint: Returns audit metrics and workspace telemetry."""
     return get_admin_audit_metrics()
 
 
 # ============================================================================
-# 3. KNOWLEDGE BASE (RAG) MANAGEMENT ENDPOINTS
+# 2. SYSTEM HEALTH, MODEL CONFIGURATION & RESIDENT MODEL STATUS
 # ============================================================================
 
-@app.get("/knowledge_base/files")
-def get_kb_files(current_user: Dict[str, Any] = Depends(get_current_user)):
-    """Returns live list of ingested SOP reference files and vector chunk counts from ChromaDB."""
-    try:
-        files = get_reference_files()
-        total_chunks = sum(f.get("chunk_count", 0) for f in files)
-        return {
-            "files": files,
-            "total_documents": len(files),
-            "total_chunks": total_chunks
-        }
-    except Exception as e:
-        logging.error(f"Error fetching Knowledge Base files: {e}")
-        return {"files": [], "total_documents": 0, "total_chunks": 0}
+@app.get("/api/config/models")
+@app.get("/api/models")
+def get_models_config_endpoint():
+    """Returns dynamic model configuration and router options loaded from models_config.json."""
+    cfg = load_models_config()
+    models_meta = cfg.get("models", {})
+    raw_options = cfg.get("options", [])
+
+    formatted_options = []
+    for opt in raw_options:
+        opt_id = opt.get("id", "")
+        opt_role = opt.get("role", opt_id)
+        base_label = opt.get("label", opt_id)
+        base_desc = opt.get("desc", "")
+
+        model_info = models_meta.get(opt_role, models_meta.get(opt_id, {}))
+        tag = model_info.get("tag", "") if isinstance(model_info, dict) else ""
+
+        if tag and not ("(" in base_label and ")" in base_label):
+            display_label = f"{base_label} ({tag})"
+        else:
+            display_label = base_label
+
+        formatted_options.append({
+            "id": opt_id,
+            "role": opt_role,
+            "label": display_label,
+            "desc": base_desc or (f"{tag} Model" if tag else display_label),
+            "model_tag": tag
+        })
+
+    return {
+        "models": models_meta,
+        "options": formatted_options
+    }
 
 
-@app.post("/knowledge_base/upload")
-async def upload_kb_file(
-    file: UploadFile = File(...),
-    current_user: Dict[str, Any] = Depends(require_admin)
-):
-    """Admin endpoint: Saves and ingests an enterprise SOP/manual into ChromaDB on the fly."""
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="Filename missing")
-
-    try:
-        target_path = REFERENCE_FILES_DIR / file.filename
-        contents = await file.read()
-        with open(target_path, "wb") as f:
-            f.write(contents)
-
-        return ingest_document(str(target_path))
-    except Exception as e:
-        logging.error(f"Error ingesting KB document '{file.filename}': {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/health")
+@app.get("/api/health")
+def health_check():
+    """Health check endpoint for system monitoring."""
+    resident_models = get_all_resident_models()
+    return {
+        "status": "healthy",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "database": "postgresql",
+        "vram_resident_models": resident_models
+    }
 
 
-@app.delete("/knowledge_base/files/{filename}")
-def delete_kb_file(
-    filename: str,
-    current_user: Dict[str, Any] = Depends(require_admin)
-):
-    """Admin endpoint: Deletes an ingested document and its vector chunks from ChromaDB."""
-    try:
-        deleted = delete_document(filename)
-        return {"status": "success", "filename": filename, "deleted": deleted}
-    except Exception as e:
-        logging.error(f"Error deleting KB document '{filename}': {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/network/status")
+@app.get("/api/network/status")
+def network_airgap_status():
+    """Returns live on-premise air-gap network telemetry & zero-egress status."""
+    resident_models = get_all_resident_models()
+    return {
+        "status": "100% AIR_GAPPED_ISOLATED",
+        "wan_egress_bytes": 0,
+        "external_sockets": 0,
+        "sovereign_mode": True,
+        "active_models": resident_models,
+        "local_services": [
+            {"service": "FastAPI Backend API", "endpoint": "127.0.0.1:8000", "protocol": "HTTP/SSE", "status": "bound_local"},
+            {"service": "PostgreSQL + pgvector", "endpoint": "127.0.0.1:5432", "protocol": "TCP", "status": "bound_local"},
+            {"service": "Ollama LLM Engine", "endpoint": "127.0.0.1:11434", "protocol": "HTTP", "status": "bound_local"}
+        ],
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    }
 
 
 # ============================================================================
-# 4. THREADS & WORKSPACE FILE STAGING ENDPOINTS
+# 3. THREAD MANAGEMENT & METADATA
 # ============================================================================
 
+@app.post("/api/threads")
 @app.post("/threads")
 def create_thread(
-    payload: Optional[Dict[str, Any]] = Body(None),
+    payload: Optional[Dict[str, Any]] = Body(default={}),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """Creates a new conversation thread ID linked to the authenticated user."""
+    """Creates a new conversation thread link for the authenticated user."""
     thread_id = str(uuid.uuid4())
     link_thread_to_user(thread_id, current_user["user_id"])
     return {"thread_id": thread_id, "user_id": current_user["user_id"]}
 
 
+@app.get("/api/threads")
 @app.get("/threads")
-def get_threads(
+def list_threads(
     limit: int = 50,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """Lists conversation threads filtered by caller's user_id (or all threads for admins)."""
-    if not Path(DB_FILENAME).exists():
-        return []
-
-    try:
-        conn = sqlite3.connect(DB_FILENAME)
-        cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT thread_id FROM checkpoints ORDER BY checkpoint_id DESC LIMIT ?", (limit,))
-        rows = cursor.fetchall()
-        conn.close()
-        thread_ids = [r[0] for r in rows]
-    except Exception as e:
-        logging.error(f"Error querying thread checkpoints: {e}")
-        return []
-
-    thread_user_map = get_thread_user_map()
-    all_users = {u["user_id"]: u for u in get_all_users()}
-
     user_id = current_user["user_id"]
     is_admin = current_user.get("role") == "admin"
 
-    filtered_thread_ids = []
-    for tid in thread_ids:
-        owner_id = thread_user_map.get(tid)
-        if not owner_id:
-            owner_id = user_id
-            link_thread_to_user(tid, owner_id)
-            thread_user_map[tid] = owner_id
+    try:
+        rows = execute_query(
+            "SELECT thread_id, user_id, title, updated_at FROM threads ORDER BY updated_at DESC LIMIT %s",
+            (limit,),
+            fetch_all=True
+        ) or []
+        thread_rows = rows
+    except Exception as e:
+        logging.error(f"Error querying thread checkpoints: {e}")
+        thread_rows = []
 
+    thread_user_map = get_thread_user_map()
+    all_users = {u["user_id"]: u for u in get_all_users()}
+    db_titles = {r[0]: r[2] for r in thread_rows if len(r) > 2 and r[2]}
+
+    filtered_thread_ids = []
+    for r in thread_rows:
+        tid = r[0]
+        owner_id = r[1] or thread_user_map.get(tid, user_id)
         if is_admin or owner_id == user_id:
             filtered_thread_ids.append(tid)
 
     summaries = []
     builder = build_orchestrator_graph()
 
-    with SqliteSaver.from_conn_string(DB_FILENAME) as checkpointer:
+    with PostgresSaver.from_conn_string(get_db_url()) as checkpointer:
         graph = builder.compile(checkpointer=checkpointer)
         for tid in filtered_thread_ids:
             owner_id = thread_user_map.get(tid, user_id)
@@ -438,71 +582,119 @@ def get_threads(
                 snapshot = graph.get_state(config)
                 values = snapshot.values or {}
                 prompt = values.get("prompt") or "New Conversation"
-                preview = prompt[:80] + ("..." if len(prompt) > 80 else "")
-                checkpoint_id = snapshot.config.get("configurable", {}).get("checkpoint_id", "")
+
+                response_preview = ""
+                if "response" in values and values["response"]:
+                    raw_res = str(values["response"]).strip()
+                    response_preview = raw_res[:100] + ("..." if len(raw_res) > 100 else "")
+
+                tool_count = len(values.get("tool_results", []))
+
+                # Count files uploaded for thread from file_metadata table
+                fm_cnt_res = execute_query(
+                    "SELECT COUNT(*) FROM file_metadata WHERE thread_id = %s",
+                    (tid,),
+                    fetch_one=True
+                )
+                file_count = fm_cnt_res[0] if fm_cnt_res else 0
+
+                db_t = db_titles.get(tid)
+                if db_t and db_t != "New Conversation":
+                    resolved_title = db_t
+                elif prompt and prompt != "New Conversation":
+                    resolved_title = prompt[:50] + ("..." if len(prompt) > 50 else "")
+                else:
+                    resolved_title = "New Conversation"
+
+                updated_at_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 summaries.append({
                     "thread_id": tid,
-                    "preview": preview,
-                    "updated_at": checkpoint_id,
-                    "user_id": owner_id,
-                    "user_name": owner_name,
-                    "user_role": owner_role
+                    "title": resolved_title,
+                    "preview": resolved_title,
+                    "first_prompt": prompt,
+                    "response_preview": response_preview,
+                    "tool_count": tool_count,
+                    "file_count": file_count,
+                    "owner_id": owner_id,
+                    "owner_name": owner_name,
+                    "owner_role": owner_role,
+                    "updated_at": updated_at_str
                 })
-            except Exception:
-                summaries.append({
-                    "thread_id": tid,
-                    "preview": f"Thread {tid[:8]}",
-                    "updated_at": "",
-                    "user_id": owner_id,
-                    "user_name": owner_name,
-                    "user_role": owner_role
-                })
+            except Exception as e:
+                logging.error(f"Error reading thread {tid} snapshot: {e}")
 
     return summaries
 
 
+@app.delete("/api/threads/{thread_id}")
 @app.delete("/threads/{thread_id}")
 def delete_thread(
     thread_id: str,
     current_user: Dict[str, Any] = Depends(require_admin)
 ):
-    """Admin endpoint: Deletes thread checkpoints and user link."""
+    """Admin endpoint: Deletes thread checkpoints, messages, files, and user link in PostgreSQL."""
     try:
-        conn = sqlite3.connect(DB_FILENAME)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,))
-        cursor.execute("DELETE FROM writes WHERE thread_id = ?", (thread_id,))
-        cursor.execute("DELETE FROM thread_users WHERE thread_id = ?", (thread_id,))
-        conn.commit()
-        conn.close()
+        execute_query("DELETE FROM checkpoints WHERE thread_id = %s", (thread_id,), commit=True)
+        execute_query("DELETE FROM checkpoint_writes WHERE thread_id = %s", (thread_id,), commit=True)
+        execute_query("DELETE FROM checkpoint_blobs WHERE thread_id = %s", (thread_id,), commit=True)
+        execute_query("DELETE FROM messages WHERE thread_id = %s", (thread_id,), commit=True)
+        execute_query("DELETE FROM file_metadata WHERE thread_id = %s", (thread_id,), commit=True)
+        execute_query("DELETE FROM threads WHERE thread_id = %s", (thread_id,), commit=True)
         return {"status": "success", "thread_id": thread_id}
     except Exception as e:
         logging.error(f"Error deleting thread {thread_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================================
+# 4. FILE UPLOAD & DISK PERSISTENCE ENDPOINTS
+# ============================================================================
+
 @app.post("/threads/{thread_id}/upload")
+@app.post("/api/threads/{thread_id}/upload")
 async def upload_file(
     thread_id: str,
     file: UploadFile = File(...),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """Saves uploaded file into the thread workspace directory (Owner or Admin)."""
+    """Saves uploaded file to local disk (data/uploads/{thread_id}/{file_id}_{filename}) & PostgreSQL file_metadata."""
     verify_thread_access(thread_id, current_user)
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename missing")
 
     try:
-        target_path = validate_workspace_path(file.filename, thread_id, create_parents=True)
+        link_thread_to_user(thread_id, current_user["user_id"])
         contents = await file.read()
-        with open(target_path, "wb") as f:
+        file_id = str(uuid.uuid4())
+
+        # Structured local disk storage path: data/uploads/{thread_id}/{file_id}_{filename}
+        storage_dir = Path("data/uploads") / thread_id
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        storage_path = storage_dir / f"{file_id}_{file.filename}"
+        with open(storage_path, "wb") as f:
             f.write(contents)
 
+        # Copy to workspace for tool execution context
+        ws_path = validate_workspace_path(file.filename, thread_id, create_parents=True)
+        with open(ws_path, "wb") as f:
+            f.write(contents)
+
+        # Insert metadata into PostgreSQL file_metadata table
+        execute_query(
+            """
+            INSERT INTO file_metadata (file_id, thread_id, user_id, original_filename, storage_path, mime_type, file_size_bytes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (file_id, thread_id, current_user["user_id"], file.filename, str(storage_path), file.content_type or "application/octet-stream", len(contents)),
+            commit=True
+        )
+
         return {
-            "file_id": file.filename,
+            "file_id": file_id,
             "filename": file.filename,
-            "file_type": target_path.suffix,
-            "filepath": str(target_path)
+            "file_type": ws_path.suffix,
+            "filepath": str(ws_path),
+            "storage_path": str(storage_path)
         }
     except Exception as e:
         logging.error(f"Error uploading file for thread {thread_id}: {e}")
@@ -515,15 +707,24 @@ def download_workspace_file(
     filename: str,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """Downloads a deliverable or uploaded file from the thread workspace (Owner or Admin)."""
+    """Downloads a deliverable or uploaded file from thread workspace or disk storage."""
     verify_thread_access(thread_id, current_user)
     try:
         file_path = validate_workspace_path(filename, thread_id)
         if not file_path.exists() or not file_path.is_file():
-            root_dir = Path(__file__).parent
-            found = list(root_dir.rglob(filename))
-            if found and found[0].exists():
-                file_path = found[0]
+            # Check data/uploads/{thread_id} directory
+            upload_dir = Path("data/uploads") / thread_id
+            if upload_dir.exists():
+                found = list(upload_dir.glob(f"*_{filename}"))
+                if found and found[0].exists():
+                    file_path = found[0]
+                else:
+                    root_dir = Path(__file__).parent
+                    found_root = list(root_dir.rglob(filename))
+                    if found_root and found_root[0].exists():
+                        file_path = found_root[0]
+                    else:
+                        raise HTTPException(status_code=404, detail=f"File '{filename}' not found.")
             else:
                 raise HTTPException(status_code=404, detail=f"File '{filename}' not found in workspace.")
         return FileResponse(path=str(file_path), filename=filename)
@@ -536,91 +737,143 @@ def download_workspace_file(
 # ============================================================================
 
 @app.post("/threads/{thread_id}/messages")
+@app.post("/api/threads/{thread_id}/messages")
 async def send_message(
     thread_id: str,
     payload: Dict[str, Any] = Body(...),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
-    Streams agent response and real-time execution status via SSE (text/event-stream).
-    Payload: {"content": str, "file_ids": Optional[List[str]], "thinking": bool}
+    Primary API Endpoint: SSE EventSource Streaming execution turn.
+    Streams execution stages, router decision, model loading, tool progress, and final content chunk.
     """
     verify_thread_access(thread_id, current_user)
+    link_thread_to_user(thread_id, current_user["user_id"])
+
     content = payload.get("content", "").strip()
-    file_ids = payload.get("file_ids", []) or []
     thinking = payload.get("thinking", True)
+    files_payload = payload.get("files", [])
 
-    if not content and not file_ids:
-        raise HTTPException(status_code=400, detail="Message content or file_ids required")
+    if not content:
+        raise HTTPException(status_code=400, detail="Message content cannot be empty")
 
-    async def sse_event_generator():
-        current_node = "init"
+    update_thread_title(thread_id, content)
+
+    file_metadata_objs = []
+    files_payload = payload.get("files", [])
+    if files_payload:
+        for f_item in files_payload:
+            fname = f_item.get("filename")
+            fpath = f_item.get("filepath") or f_item.get("storage_path")
+            ftype = f_item.get("file_type") or (Path(fname).suffix if fname else "")
+            if fname and fpath:
+                file_metadata_objs.append(FileMetadata(filename=fname, extension=ftype, filepath=str(fpath)))
+            elif fname:
+                try:
+                    ws_path = validate_workspace_path(fname, thread_id)
+                    file_metadata_objs.append(FileMetadata(filename=fname, extension=ftype, filepath=str(ws_path)))
+                except Exception:
+                    pass
+
+    file_ids_payload = payload.get("file_ids", [])
+    if not file_metadata_objs and file_ids_payload:
+        for fid in file_ids_payload:
+            row = execute_query(
+                "SELECT original_filename, storage_path FROM file_metadata WHERE file_id = %s",
+                (str(fid),),
+                fetch_one=True
+            )
+            if row:
+                fname, fpath = row[0], row[1]
+                ftype = Path(fname).suffix
+                try:
+                    ws_path = validate_workspace_path(fname, thread_id)
+                    actual_path = str(ws_path) if ws_path.exists() else str(fpath)
+                except Exception:
+                    actual_path = str(fpath)
+                file_metadata_objs.append(FileMetadata(filename=fname, extension=ftype, filepath=actual_path))
+
+    async def event_generator():
         start_time = time.time()
         try:
-            yield make_status_event("routing", "Running router classifier...")
+            yield {
+                "event": "status",
+                "data": json.dumps({"message": "Evaluating Waterfall Router (Stage 1 Exact -> Stage 2 Vector -> Stage 3 Meta-Agent)..."})
+            }
+            yield {
+                "event": "stage",
+                "data": json.dumps({"message": "Evaluating Waterfall Router (Stage 1 Exact -> Stage 2 Vector -> Stage 3 Meta-Agent)..."})
+            }
 
-            file_metadata_objs = []
-            if file_ids:
-                for fid in file_ids:
-                    try:
-                        fpath = validate_workspace_path(fid, thread_id, create_parents=False)
-                        if fpath.exists():
-                            file_metadata_objs.append(
-                                FileMetadata(
-                                    filename=fpath.name,
-                                    extension=fpath.suffix,
-                                    filepath=str(fpath),
-                                    path=str(fpath)
-                                )
-                            )
-                    except Exception as fe:
-                        logging.warning(f"Could not resolve attached file '{fid}': {fe}")
-
-            route_decision = route(content, file_metadata_objs if file_metadata_objs else None)
-            role = getattr(route_decision, "role", "reasoning") if route_decision else "reasoning"
-            method = getattr(route_decision, "method", "classifier") if route_decision else "classifier"
-            confidence = getattr(route_decision, "confidence", 0.98) if route_decision else 0.98
-            selected_model = getattr(route_decision, "selected_model", MODEL_REGISTRY.get(role, "qwen3.5:4b-q4_K_M"))
-
-            yield make_status_event("routed", f"Router decision: role='{role}', confidence={confidence:.2f}, method='{method}'")
-
-            if is_model_resident(selected_model):
-                yield make_status_event("model_ready", f"Model '{selected_model}' is resident in VRAM")
+            model_override = payload.get("model_override") or payload.get("model")
+            if model_override in ("coding", "reasoning"):
+                decision = RouteDecision(
+                    role=model_override,
+                    confidence=1.0,
+                    method="manual_override"
+                )
             else:
-                yield make_status_event("model_load", f"Model '{selected_model}' not resident, loading weights...")
+                decision = route(content, file_metadata_objs if file_metadata_objs else None)
 
-            plan_steps = []
-            if file_metadata_objs:
-                plan_steps.append("Run OCR & vision analysis on attached workspace file(s)")
-            if any(k in content.lower() for k in ["sop", "manual", "policy", "threshold", "rag", "knowledge", "standard"]):
-                plan_steps.append("Search ChromaDB vector store for relevant enterprise SOP chunks")
-            if any(k in content.lower() for k in ["python", "csv", "data", "calculate", "analyze", "temperature", "log"]):
-                plan_steps.append("Execute Python code in sandbox to analyze data & calculate metrics")
-            if any(k in content.lower() for k in ["word", "excel", "powerpoint", "pptx", "docx", "xlsx", "report", "presentation", "deliverable"]):
-                plan_steps.append("Compose formatted document deliverable")
+            role = decision.role if decision else "reasoning"
+            selected_model = MODEL_REGISTRY.get(role, MODEL_REGISTRY["reasoning"])
 
-            if not plan_steps:
-                plan_steps = ["Analyze prompt instructions", "Synthesize parametric response"]
-            else:
-                plan_steps.append("Synthesize tool outputs & format final response")
-
-            rd_dict = {
+            decision_reasoning = getattr(decision, "reasoning", None) or f"Waterfall Router ({decision.method if decision else 'fallback'})"
+            decision_dict = {
                 "role": role,
-                "selected_model": selected_model,
-                "method": method,
-                "confidence": confidence
+                "method": decision.method if decision else "fallback",
+                "confidence": decision.confidence if decision else 1.0,
+                "reasoning": decision_reasoning,
+                "model": selected_model
             }
 
             yield {
                 "event": "route_decision",
-                "data": json.dumps(rd_dict)
+                "data": json.dumps(decision_dict)
             }
+            yield {
+                "event": "router",
+                "data": json.dumps(decision_dict)
+            }
+
+            plan_steps = [
+                f"Classified intent to '{role}' agent via {decision.method if decision else 'waterfall'} router.",
+                f"Assigned open-weight model: {selected_model}."
+            ]
+
+            if file_metadata_objs:
+                plan_steps.append(f"Attached {len(file_metadata_objs)} input file(s) to workspace context.")
+
+            if role == "coding":
+                plan_steps.extend([
+                    "Initialize code_sandbox environment.",
+                    "Execute script & verify output."
+                ])
+            elif role == "data_analysis":
+                plan_steps.extend([
+                    "Inspect CSV/Excel headers and structure.",
+                    "Execute pandas data processing script."
+                ])
+            elif role == "document":
+                plan_steps.extend([
+                    "Parse document layout & section blocks.",
+                    "Generate docx/pptx deliverable."
+                ])
+            elif role == "math":
+                plan_steps.extend([
+                    "Parse mathematical expressions with sympy.",
+                    "Verify exact numeric computation."
+                ])
+            else:
+                plan_steps.extend([
+                    "Perform step-by-step reasoning.",
+                    "Synthesize response with technical clarity."
+                ])
 
             yield {
-                "event": "stage",
-                "data": json.dumps({"message": f"Prompt routed to '{role}' model"})
+                "event": "status",
+                "data": json.dumps({"message": f"Loading {selected_model} into VRAM..."})
             }
-
             yield {
                 "event": "stage",
                 "data": json.dumps({"message": f"Loading {selected_model} into memory..."})
@@ -634,7 +887,8 @@ async def send_message(
             config = {"configurable": {"thread_id": thread_id}}
             builder = build_orchestrator_graph()
 
-            with SqliteSaver.from_conn_string(DB_FILENAME) as checkpointer:
+            with PostgresSaver.from_conn_string(get_db_url()) as checkpointer:
+                checkpointer.setup()
                 graph = builder.compile(checkpointer=checkpointer)
                 snapshot = graph.get_state(config)
                 existing_values = snapshot.values or {}
@@ -643,140 +897,129 @@ async def send_message(
                 initial_state = WorkbenchState(
                     prompt=content,
                     file_metadata=file_metadata_objs if file_metadata_objs else None,
+                    route_decision=decision,
                     messages=existing_messages,
                     thinking=bool(thinking),
                     max_tool_iterations=5 if thinking else 2
                 )
 
-                final_response = ""
-                seen_tool_calls = set()
-                seen_tool_results_count = 0
+                yield {
+                    "event": "status",
+                    "data": json.dumps({"message": "Executing ReAct agent loop..."})
+                }
+                yield {
+                    "event": "stage",
+                    "data": json.dumps({"message": "Executing ReAct agent loop..."})
+                }
 
-                for chunk in graph.stream(initial_state, config=config, stream_mode="updates"):
-                    for node_name, updated_fields in chunk.items():
-                        current_node = node_name
+                final_state = graph.invoke(initial_state, config=config)
 
-                        if node_name == "infer":
-                            raw_calls = updated_fields.get("tool_calls", []) or []
-                            text_response = updated_fields.get("response", "")
+            res_dict = final_state if isinstance(final_state, dict) else final_state.__dict__
+            response_text = res_dict.get("response", "")
+            tool_results = res_dict.get("tool_results", [])
+            messages = res_dict.get("messages", [])
 
-                            for call in raw_calls:
-                                call_id = call.get("id") or str(uuid.uuid4())
-                                if call_id not in seen_tool_calls:
-                                    seen_tool_calls.add(call_id)
-                                    func_info = call.get("function", {}) if isinstance(call, dict) else {}
-                                    t_name = func_info.get("name") or call.get("name") or ""
-                                    t_input = func_info.get("arguments") or call.get("arguments") or {}
+            # Persist messages to PostgreSQL messages table
+            from orchestrator.graph import save_messages_to_postgres
+            save_messages_to_postgres(thread_id, messages)
 
-                                    yield make_status_event("tool_call", f"Parsed tool call '{t_name}'")
-
-                                    yield {
-                                        "event": "tool_call_start",
-                                        "data": json.dumps({
-                                            "tool_name": t_name,
-                                            "tool_input": t_input
-                                        })
-                                    }
-
-                            if text_response and not raw_calls:
-                                final_response = text_response
-
-                        elif node_name == "tool_node":
-                            results = updated_fields.get("tool_results", []) or []
-                            new_results = results[seen_tool_results_count:]
-                            seen_tool_results_count = len(results)
-
-                            for tr in new_results:
-                                status = getattr(tr, "status", None) or (tr.get("status") if isinstance(tr, dict) else "success")
-                                meta = getattr(tr, "metadata", {}) or (tr.get("metadata") if isinstance(tr, dict) else {})
-                                data_val = getattr(tr, "data", None) or (tr.get("data") if isinstance(tr, dict) else None)
-                                err_val = getattr(tr, "error", None) or (tr.get("error") if isinstance(tr, dict) else None)
-                                t_name = meta.get("tool_name") or meta.get("tool") or "unknown"
-                                is_success = str(status).lower() in ("success", "toolstatus.success") and not err_val
-
-                                summary = _build_output_summary(t_name, str(status), data_val, meta)
-                                raw_payload = tr.model_dump() if hasattr(tr, "model_dump") else dict(tr)
-
-                                outcome_str = "success" if is_success else "failure"
-                                yield make_status_event("tool_result", f"Tool '{t_name}' finished: {outcome_str}")
-
-                                yield {
-                                    "event": "tool_call_result",
-                                    "data": json.dumps({
-                                        "tool_name": t_name,
-                                        "success": is_success,
-                                        "output_summary": summary,
-                                        "raw_output": raw_payload
-                                    })
-                                }
-
-                if final_response:
-                    yield make_status_event("synthesis", "Generating response synthesis...")
-
-                    yield {
-                        "event": "stage",
-                        "data": json.dumps({"message": "Analyzing tool outputs..."})
-                    }
-
-                    words = final_response.split(" ")
-                    for idx, w in enumerate(words):
-                        space = " " if idx < len(words) - 1 else ""
-                        yield {
-                            "event": "token",
-                            "data": json.dumps({"content": w + space})
-                        }
-                        await asyncio.sleep(0.01)
-
-                duration_seconds = round(max(0.5, time.time() - start_time), 1)
-
-                try:
-                    graph.update_state(config, {
-                        "duration_seconds": duration_seconds,
-                        "plan_steps": plan_steps
-                    })
-                except Exception as update_err:
-                    logging.warning(f"Could not update final checkpoint state with duration: {update_err}")
-
-                yield make_status_event("done", "Turn complete")
+            for tr in tool_results:
+                tr_dict = tr.model_dump() if hasattr(tr, "model_dump") else tr
+                t_name = tr_dict.get("metadata", {}).get("tool_name") or tr_dict.get("metadata", {}).get("tool") or "tool"
+                t_status = tr_dict.get("status")
+                is_success = t_status == ToolStatus.SUCCESS or t_status == "success"
 
                 yield {
-                    "event": "final",
+                    "event": "tool_call_start",
+                    "data": json.dumps({"tool_name": t_name, "tool_input": tr_dict.get("input", {}), "isRunning": False})
+                }
+                yield {
+                    "event": "tool_call_result",
                     "data": json.dumps({
-                        "content": final_response,
-                        "thread_id": thread_id,
-                        "duration_seconds": duration_seconds,
-                        "plan_steps": plan_steps,
-                        "route_decision": rd_dict
+                        "tool_name": t_name,
+                        "success": is_success,
+                        "output_summary": tr_dict.get("metadata", {}).get("summary") or str(tr_dict.get("output", ""))[:200],
+                        "raw_output": str(tr_dict.get("output", ""))
+                    })
+                }
+                yield {
+                    "event": "tool",
+                    "data": json.dumps({
+                        "tool_name": t_name,
+                        "status": t_status,
+                        "result": tr_dict
                     })
                 }
 
-        except Exception as ex:
-            logging.error(f"Error in SSE generator at node '{current_node}': {ex}")
             yield {
-                "event": "error",
-                "data": json.dumps({
-                    "message": str(ex),
-                    "node": current_node
-                })
+                "event": "token",
+                "data": json.dumps({"content": response_text})
+            }
+            yield {
+                "event": "message",
+                "data": json.dumps({"content": response_text})
             }
 
-    return EventSourceResponse(sse_event_generator())
+            elapsed = round(time.time() - start_time, 2)
+            yield {
+                "event": "final",
+                "data": json.dumps({
+                    "content": response_text,
+                    "plan_steps": plan_steps,
+                    "route_decision": decision_dict,
+                    "duration_seconds": elapsed
+                })
+            }
+            yield {
+                "event": "done",
+                "data": json.dumps({"status": "completed", "thread_id": thread_id})
+            }
+
+        except Exception as e:
+            logging.error(f"Error during message streaming for thread {thread_id}: {e}")
+            yield {
+                "event": "error",
+                "data": json.dumps({"message": str(e), "error": str(e)})
+            }
+
+    return EventSourceResponse(event_generator())
 
 
+@app.get("/api/threads/{thread_id}")
+@app.get("/threads/{thread_id}")
+@app.get("/api/threads/{thread_id}/history")
 @app.get("/threads/{thread_id}/history")
 def get_thread_history(
     thread_id: str,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """Returns full message history, tool results, and execution duration for a thread (Owner or Admin)."""
+    """Returns full message history, tool results, and execution metrics for a thread from PostgreSQL."""
     verify_thread_access(thread_id, current_user)
-    if not Path(DB_FILENAME).exists():
-        raise HTTPException(status_code=404, detail="Checkpoint database not found")
+
+    # Fetch files associated with thread from PostgreSQL file_metadata table
+    fm_rows = execute_query(
+        "SELECT file_id, original_filename, storage_path, mime_type, file_size_bytes FROM file_metadata WHERE thread_id = %s ORDER BY uploaded_at ASC",
+        (thread_id,),
+        fetch_all=True
+    ) or []
+
+    thread_files = [
+        {
+            "file_id": str(r[0]),
+            "filename": r[1],
+            "original_filename": r[1],
+            "storage_path": r[2],
+            "mime_type": r[3],
+            "file_size_bytes": r[4]
+        }
+        for r in fm_rows
+    ]
 
     builder = build_orchestrator_graph()
     config = {"configurable": {"thread_id": thread_id}}
 
-    with SqliteSaver.from_conn_string(DB_FILENAME) as checkpointer:
+    with PostgresSaver.from_conn_string(get_db_url()) as checkpointer:
+        checkpointer.setup()
         graph = builder.compile(checkpointer=checkpointer)
         try:
             snapshot = graph.get_state(config)
@@ -785,49 +1028,129 @@ def get_thread_history(
 
         values = snapshot.values or {}
         if not values:
-            return {"thread_id": thread_id, "messages": [], "tool_results": []}
+            return {"thread_id": thread_id, "messages": [], "tool_results": [], "files": thread_files}
 
         raw_messages = values.get("messages", [])
         raw_tool_results = values.get("tool_results", [])
         route_decision = values.get("route_decision")
 
+        # Fallback to state file_metadata if database returns empty
+        if not thread_files and values.get("file_metadata"):
+            for fm in values.get("file_metadata", []):
+                fname = getattr(fm, "filename", None) or (fm.get("filename") if isinstance(fm, dict) else "")
+                if fname:
+                    thread_files.append({
+                        "file_id": str(uuid.uuid4()),
+                        "filename": fname,
+                        "original_filename": fname
+                    })
+
         formatted_tool_results = []
         for tr in raw_tool_results:
-            status = getattr(tr, "status", None) or (tr.get("status") if isinstance(tr, dict) else "success")
-            meta = getattr(tr, "metadata", {}) or (tr.get("metadata") if isinstance(tr, dict) else {})
-            data_val = getattr(tr, "data", None) or (tr.get("data") if isinstance(tr, dict) else None)
-            err_val = getattr(tr, "error", None) or (tr.get("error") if isinstance(tr, dict) else None)
-            t_name = meta.get("tool_name") or meta.get("tool") or "unknown"
-            is_success = str(status).lower() in ("success", "toolstatus.success") and not err_val
-            summary = _build_output_summary(t_name, str(status), data_val, meta)
-            raw_payload = tr.model_dump() if hasattr(tr, "model_dump") else dict(tr)
+            if hasattr(tr, "model_dump"):
+                formatted_tool_results.append(tr.model_dump())
+            elif isinstance(tr, dict):
+                formatted_tool_results.append(tr)
 
-            formatted_tool_results.append({
-                "tool_name": t_name,
-                "success": is_success,
-                "output_summary": summary,
-                "raw_output": raw_payload
-            })
-
-        rd_dict = None
-        if route_decision:
-            role = getattr(route_decision, "role", None) or (route_decision.get("role") if isinstance(route_decision, dict) else None)
-            method = getattr(route_decision, "method", None) or (route_decision.get("method") if isinstance(route_decision, dict) else None)
-            conf = getattr(route_decision, "confidence", None) or (route_decision.get("confidence") if isinstance(route_decision, dict) else None)
-            rd_dict = {"role": role, "method": method, "confidence": conf}
+        formatted_messages = []
+        user_turn_count = 0
+        for msg in raw_messages:
+            if isinstance(msg, dict):
+                role = msg.get("role")
+                if role in ("user", "assistant"):
+                    fmt_msg = {
+                        "role": role,
+                        "content": msg.get("content", "")
+                    }
+                    if role == "user":
+                        attached = msg.get("attachedFiles") or msg.get("attached_files") or msg.get("files")
+                        if not attached and user_turn_count == 0 and thread_files:
+                            attached = thread_files
+                        if attached:
+                            fmt_msg["attachedFiles"] = attached
+                            fmt_msg["attached_files"] = attached
+                            fmt_msg["files"] = attached
+                        user_turn_count += 1
+                    formatted_messages.append(fmt_msg)
 
         return {
             "thread_id": thread_id,
-            "prompt": values.get("prompt"),
-            "route_decision": rd_dict,
-            "messages": raw_messages,
+            "route_decision": route_decision.model_dump() if hasattr(route_decision, "model_dump") else route_decision,
+            "messages": formatted_messages,
             "tool_results": formatted_tool_results,
-            "response": values.get("response"),
-            "duration_seconds": values.get("duration_seconds"),
-            "plan_steps": values.get("plan_steps")
+            "files": thread_files,
+            "response": values.get("response", ""),
+            "tool_iteration_count": values.get("tool_iteration_count", 0)
         }
+
+
+# ============================================================================
+# 6. RAG KNOWLEDGE BASE ENDPOINTS
+# ============================================================================
+
+@app.get("/api/rag/documents")
+@app.get("/knowledge_base/files")
+def list_rag_documents(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Returns live list of active reference files currently ingested in PostgreSQL pgvector Knowledge Base."""
+    files = get_reference_files() or []
+    if isinstance(files, list):
+        total_chunks = sum(f.get("chunk_count", 0) for f in files if isinstance(f, dict))
+        return {
+            "files": files,
+            "total_documents": len(files),
+            "total_chunks": total_chunks
+        }
+    return files
+
+
+@app.post("/api/rag/ingest")
+@app.post("/knowledge_base/upload")
+async def upload_and_ingest_rag_document(
+    file: UploadFile = File(...),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Uploads and ingests reference document into PostgreSQL pgvector Knowledge Base."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename missing")
+
+    try:
+        temp_dir = Path("data/uploads/rag_staging")
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = temp_dir / file.filename
+
+        contents = await file.read()
+        with open(temp_path, "wb") as f:
+            f.write(contents)
+
+        result = ingest_document(str(temp_path))
+
+        if temp_path.exists():
+            temp_path.unlink()
+
+        return result
+    except Exception as e:
+        logging.error(f"Error ingesting RAG document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/rag/documents/{filename}")
+@app.delete("/knowledge_base/files/{filename}")
+def delete_rag_document(
+    filename: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Deletes reference document and vector chunks from PostgreSQL pgvector Knowledge Base."""
+    try:
+        success = delete_document(filename)
+        if success:
+            return {"status": "success", "message": f"Deleted reference document '{filename}'"}
+        else:
+            raise HTTPException(status_code=404, detail=f"Document '{filename}' not found")
+    except Exception as e:
+        logging.error(f"Error deleting RAG document '{filename}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)

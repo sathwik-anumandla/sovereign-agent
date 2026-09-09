@@ -153,6 +153,9 @@ def code_sandbox(input: CodeSandboxInput) -> SandboxResult:
     if use_docker:
         steps.append("Execution Environment: Docker Container Pool (Isolated)")
         stdout, stderr, exit_code, generated_files = _run_in_docker(input.code, session_workspace, input.timeout_s)
+        if exit_code != 0 and ("ModuleNotFoundError" in stderr or "ImportError" in stderr or "No module named" in stderr):
+            steps.append("Container package fallback: Executing in Subprocess Sandbox Jail.")
+            stdout, stderr, exit_code, generated_files = _run_in_subprocess(input.code, session_workspace, input.timeout_s)
     else:
         steps.append("Execution Environment: Subprocess Sandbox Jail (Fallback)")
         stdout, stderr, exit_code, generated_files = _run_in_subprocess(input.code, session_workspace, input.timeout_s)

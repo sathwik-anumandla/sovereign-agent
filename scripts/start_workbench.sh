@@ -17,8 +17,12 @@ echo "======================================================================"
 echo "      [START] STARTING SOVEREIGN AI WORKBENCH (SIH PS 26117)"
 echo "======================================================================"
 
-# 1. Check & Start Ollama Server
-echo -n "[1/4] Checking Ollama server (http://127.0.0.1:11434)... "
+# 1. Check & Start PostgreSQL + pgvector Container
+echo "[1/5] Verifying PostgreSQL + pgvector container..."
+bash "$SCRIPT_DIR/start_postgres.sh"
+
+# 2. Check & Start Ollama Server
+echo -n "[2/5] Checking Ollama server (http://127.0.0.1:11434)... "
 if curl -s -f http://127.0.0.1:11434/api/tags > /dev/null 2>&1; then
     echo "[OK] Running"
 else
@@ -41,13 +45,13 @@ else
     echo "     Ollama server is now ready!"
 fi
 
-# 2. Check Installed Ollama Models
-echo "[2/4] Verifying required Ollama model tags..."
+# 3. Check Installed Ollama Models
+echo "[3/5] Verifying required Ollama model tags..."
 INSTALLED_MODELS=$(curl -s http://127.0.0.1:11434/api/tags | python3 -c "import sys, json; data=json.load(sys.stdin); print(' '.join([m.get('name','') for m in data.get('models',[])]))")
 echo "     Available models: $INSTALLED_MODELS"
 
-# 3. Check & Start FastAPI Backend Server
-echo -n "[3/4] Checking FastAPI backend server (http://localhost:8000)... "
+# 4. Check & Start FastAPI Backend Server
+echo -n "[4/5] Checking FastAPI backend server (http://localhost:8000)... "
 if curl -s http://localhost:8000/docs > /dev/null 2>&1; then
     echo "[OK] Running"
 else
@@ -70,8 +74,8 @@ else
     echo "     FastAPI backend API is ready at http://localhost:8000"
 fi
 
-# 4. Check & Start React Frontend
-echo -n "[4/4] Checking React Frontend dev server (http://localhost:3000)... "
+# 5. Check & Start React Frontend
+echo -n "[5/5] Checking React Frontend dev server (http://localhost:3000)... "
 if curl -s http://localhost:3000 > /dev/null 2>&1; then
     echo "[OK] Running"
 else

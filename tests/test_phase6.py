@@ -23,8 +23,9 @@ sys.path.insert(0, ROOT_DIR)
 from tool_interface import ToolStatus, ToolResult
 from router.schemas import RouteDecision
 from orchestrator.state import WorkbenchState
-from orchestrator.graph import tool_node, should_continue, run_workbench, build_orchestrator_graph, DB_FILENAME
-from langgraph.checkpoint.sqlite import SqliteSaver
+from orchestrator.graph import tool_node, should_continue, run_workbench, build_orchestrator_graph
+from langgraph.checkpoint.postgres import PostgresSaver
+from tools.db import get_db_url
 from scripts.inspect_run import inspect_thread
 
 
@@ -138,7 +139,7 @@ def test_react_graph_tool_dispatch_wiring():
     thread_id = f"test_react_wiring_{uuid4().hex[:8]}"
     config = {"configurable": {"thread_id": thread_id}}
 
-    with SqliteSaver.from_conn_string(DB_FILENAME) as checkpointer:
+    with PostgresSaver.from_conn_string(get_db_url()) as checkpointer:
         graph = builder.compile(checkpointer=checkpointer)
 
         # Simulate state after infer node returned tool_calls

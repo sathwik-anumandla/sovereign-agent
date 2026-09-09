@@ -11,7 +11,7 @@ const TOOL_LABELS = {
   file_io: 'Accessed Workspace File I/O'
 };
 
-export default function ToolCard({ toolCall }) {
+export default function ToolCard({ toolCall, activeThreadId }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const { tool_name, status, tool_input, output_summary, raw_output, isRunning } = toolCall;
 
@@ -20,14 +20,20 @@ export default function ToolCard({ toolCall }) {
   // Extract generated file deliverable if present
   let generatedFilename = null;
   if (raw_output) {
-    const meta = raw_output.metadata || {};
-    const dataVal = raw_output.data || {};
-    const pathStr = meta.output_path || meta.path || dataVal.output_path || dataVal.path;
-    if (pathStr && typeof pathStr === 'string' && /\.(docx|pptx|ppt|xlsx|csv|pdf|png|txt)$/i.test(pathStr)) {
-      generatedFilename = pathStr.split('/').pop().split('\\').pop();
+    const rawObj = typeof raw_output === 'object' ? raw_output : {};
+    const meta = rawObj.metadata || rawObj;
+    const dataVal = rawObj.data || {};
+    const genFiles = meta.generated_files || rawObj.generated_files || [];
+    if (Array.isArray(genFiles) && genFiles.length > 0) {
+      generatedFilename = genFiles[0];
+    } else {
+      const pathStr = meta.output_path || meta.path || dataVal.output_path || dataVal.path;
+      if (pathStr && typeof pathStr === 'string' && /\.(docx|pptx|ppt|xlsx|csv|pdf|png|txt)$/i.test(pathStr)) {
+        generatedFilename = pathStr.split('/').pop().split('\\').pop();
+      }
     }
   }
-  if (!generatedFilename && output_summary && output_summary.includes("'")) {
+  if (!generatedFilename && output_summary && typeof output_summary === 'string') {
     const match = output_summary.match(/'([^']+\.(?:docx|pptx|ppt|xlsx|csv|pdf|png|txt))'/i);
     if (match) generatedFilename = match[1];
   }
@@ -51,7 +57,7 @@ export default function ToolCard({ toolCall }) {
 
         {generatedFilename && (
           <a
-            href={`http://localhost:8000/workspace/default_session/files/${generatedFilename}`}
+            href={`http://localhost:8000/workspace/${activeThreadId || 'default_session'}/files/${generatedFilename}`}
             download
             target="_blank"
             rel="noopener noreferrer"

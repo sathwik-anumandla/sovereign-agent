@@ -23,6 +23,7 @@ export default function Sidebar({
   onDeleteThread,
   onOpenKbModal,
   onOpenAdminModal,
+  onOpen2faModal,
   currentUser,
   onLogout,
   isOpen,
@@ -38,6 +39,8 @@ export default function Sidebar({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [pwdStatus, setPwdStatus] = useState(null);
   const [isChangingPwd, setIsChangingPwd] = useState(false);
+
+  const isAdmin = currentUser?.role === 'admin';
 
   const handleChangePasswordSubmit = async (e) => {
     e.preventDefault();
@@ -92,14 +95,12 @@ export default function Sidebar({
   const filteredThreads = threads.filter((t) => {
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase();
-    const previewStr = (t.preview || `Chat ${t.thread_id}`).toLowerCase();
+    const previewStr = (t.title || t.preview || t.first_prompt || `Chat ${t.thread_id}`).toLowerCase();
     const ownerName = (t.user_name || '').toLowerCase();
     return previewStr.includes(term) || t.thread_id.toLowerCase().includes(term) || ownerName.includes(term);
   });
 
   if (!isOpen) return null;
-
-  const isAdmin = currentUser?.role === 'admin';
 
   return (
     <aside className="flex h-full w-64 flex-col border-r sidebar-bg p-3 theme-text-primary transition-all duration-200 relative">
@@ -117,7 +118,7 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* Logged-In User Profile Card (No Dropdown Switcher) */}
+      {/* Logged-In User Profile Card */}
       <div className="mb-3 rounded-xl bg-[var(--bg-input)] px-3 py-2.5 shadow-xs flex items-center justify-between">
         <div className="flex items-center gap-2.5 truncate">
           <span className={`h-3 w-3 rounded-full shrink-0 ${currentUser?.avatar_color || 'bg-emerald-500'}`} />
@@ -136,14 +137,26 @@ export default function Sidebar({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowPasswordModal(true)}
-          className="rounded p-1 theme-text-muted hover:theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer shrink-0"
-          title="Change Password"
-        >
-          <Key className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onOpen2faModal && (
+            <button
+              type="button"
+              onClick={onOpen2faModal}
+              className="rounded p-1 theme-text-muted hover:theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
+              title="Two-Factor Security (2FA)"
+            >
+              <ShieldCheck className="h-3.5 w-3.5 text-blue-400" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowPasswordModal(true)}
+            className="rounded p-1 theme-text-muted hover:theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
+            title="Change Password"
+          >
+            <Key className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Action Buttons: New Chat, Knowledge Base, Admin Panel */}
@@ -163,6 +176,16 @@ export default function Sidebar({
           >
             <BookOpen className="h-4 w-4 theme-text-secondary" />
             <span>Knowledge Base</span>
+          </button>
+        )}
+
+        {onOpen2faModal && (
+          <button
+            onClick={onOpen2faModal}
+            className="flex w-full items-center gap-2 rounded-lg card-bg py-2 px-3 text-xs font-medium theme-text-primary transition-colors hover:bg-[var(--bg-hover)] border-0 cursor-pointer shadow-xs"
+          >
+            <ShieldCheck className="h-4 w-4 text-emerald-400" />
+            <span>2FA Security</span>
           </button>
         )}
 
@@ -219,7 +242,7 @@ export default function Sidebar({
                   className="flex-1 text-left truncate border-0 bg-transparent cursor-pointer p-0"
                 >
                   <span className="truncate block">
-                    {thread.preview || `Chat ${thread.thread_id.slice(0, 8)}`}
+                    {thread.title || thread.preview || thread.first_prompt || `Chat ${thread.thread_id.slice(0, 8)}`}
                   </span>
                   {isAdmin && thread.user_name && (
                     <span className="text-[9px] font-mono theme-text-muted block truncate mt-0.5">

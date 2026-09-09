@@ -1,0 +1,60 @@
+{
+  "models": {
+    "reasoning": {
+      "tag": "qwen3.5:4b-q4_K_M",
+      "label": "Reasoning",
+      "context_window": 8192,
+      "supports_thinking": true
+    },
+    "vision": {
+      "tag": "qwen3.5:4b-q4_K_M",
+      "label": "Vision",
+      "context_window": 8192,
+      "supports_thinking": true
+    },
+    "coding": {
+      "tag": "qwen2.5-coder:3b",
+      "label": "Coding",
+      "context_window": 8192,
+      "supports_thinking": false
+    },
+    "ocr": {
+      "tag": "qwen2.5-vl:3b",
+      "label": "OCR VLM",
+      "context_window": 8192,
+      "supports_thinking": false
+    },
+    "vision_ocr": {
+      "tag": "qwen2.5-vl:3b",
+      "label": "Vision OCR",
+      "context_window": 8192,
+      "supports_thinking": false
+    },
+    "embedding": {
+      "tag": "nomic-embed-text",
+      "label": "Embedding",
+      "context_window": 2048,
+      "supports_thinking": false
+    }
+  },
+  "options": [
+    {
+      "id": "auto",
+      "role": "auto",
+      "label": "Auto (Router)",
+      "desc": "Dynamic Waterfall Routing"
+    },
+    {
+      "id": "reasoning",
+      "role": "reasoning",
+      "label": "Reasoning",
+      "desc": "Step-by-step reasoning & math"
+    },
+    {
+      "id": "coding",
+      "role": "coding",
+      "label": "Coding",
+      "desc": "Code generation & execution"
+    }
+  ]
+}

@@ -11,10 +11,10 @@ Tests:
 import time
 import uuid
 from pathlib import Path
-from langgraph.checkpoint.sqlite import SqliteSaver
-
-from orchestrator import build_orchestrator_graph, DB_FILENAME, WorkbenchState
+from orchestrator import build_orchestrator_graph, WorkbenchState
 from router.schemas import FileMetadata
+from langgraph.checkpoint.postgres import PostgresSaver
+from tools.db import get_db_url
 
 
 def test_single_image(img_filename: str):
@@ -48,7 +48,7 @@ def test_single_image(img_filename: str):
     print(f"========================================================")
 
     start_time = time.time()
-    with SqliteSaver.from_conn_string(DB_FILENAME) as checkpointer:
+    with PostgresSaver.from_conn_string(get_db_url()) as checkpointer:
         compiled_graph = builder.compile(checkpointer=checkpointer)
         result = compiled_graph.invoke(initial_state, config=config)
     elapsed = time.time() - start_time

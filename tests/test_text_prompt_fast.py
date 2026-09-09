@@ -6,9 +6,9 @@ Test text-only prompt execution with Thinking OFF (Fast Mode).
 
 import time
 import uuid
-from langgraph.checkpoint.sqlite import SqliteSaver
-
-from orchestrator import build_orchestrator_graph, DB_FILENAME, WorkbenchState
+from langgraph.checkpoint.postgres import PostgresSaver
+from orchestrator import build_orchestrator_graph, WorkbenchState
+from tools.db import get_db_url
 
 
 def run_single_test(prompt: str):
@@ -25,7 +25,7 @@ def run_single_test(prompt: str):
 
     print(f"\n--- Test Prompt: '{prompt}' ---")
     start_time = time.time()
-    with SqliteSaver.from_conn_string(DB_FILENAME) as checkpointer:
+    with PostgresSaver.from_conn_string(get_db_url()) as checkpointer:
         compiled_graph = builder.compile(checkpointer=checkpointer)
         result = compiled_graph.invoke(initial_state, config=config)
     elapsed = time.time() - start_time

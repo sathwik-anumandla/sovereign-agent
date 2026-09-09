@@ -18,7 +18,7 @@ import uuid
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
 
-from orchestrator import run_workbench, DB_FILENAME
+from orchestrator import run_workbench
 try:
     from scripts.inspect_run import inspect_thread
 except ImportError:

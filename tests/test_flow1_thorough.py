@@ -20,8 +20,10 @@ from typing import List, Dict, Any
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT_DIR)
 
-from orchestrator import build_orchestrator_graph, DB_FILENAME, WorkbenchState
+from orchestrator import build_orchestrator_graph, WorkbenchState
 from router.schemas import FileMetadata
+from langgraph.checkpoint.postgres import PostgresSaver
+from tools.db import get_db_url
 try:
     from scripts.inspect_run import inspect_thread
 except ImportError:
@@ -59,7 +61,7 @@ def run_scenario_1() -> Dict[str, Any]:
     config = {"configurable": {"thread_id": thread_id}}
     builder = build_orchestrator_graph()
 
-    with SqliteSaver.from_conn_string(DB_FILENAME) as checkpointer:
+    with PostgresSaver.from_conn_string(get_db_url()) as checkpointer:
         compiled_graph = builder.compile(checkpointer=checkpointer)
         result = compiled_graph.invoke(initial_state, config=config)
 
@@ -109,7 +111,7 @@ def run_scenario_2() -> Dict[str, Any]:
     config = {"configurable": {"thread_id": thread_id}}
     builder = build_orchestrator_graph()
 
-    with SqliteSaver.from_conn_string(DB_FILENAME) as checkpointer:
+    with PostgresSaver.from_conn_string(get_db_url()) as checkpointer:
         compiled_graph = builder.compile(checkpointer=checkpointer)
         result = compiled_graph.invoke(initial_state, config=config)
 
@@ -187,7 +189,7 @@ def run_scenario_3() -> Dict[str, Any]:
     config = {"configurable": {"thread_id": thread_id}}
     builder = build_orchestrator_graph()
 
-    with SqliteSaver.from_conn_string(DB_FILENAME) as checkpointer:
+    with PostgresSaver.from_conn_string(get_db_url()) as checkpointer:
         compiled_graph = builder.compile(checkpointer=checkpointer)
         result = compiled_graph.invoke(initial_state, config=config)
 

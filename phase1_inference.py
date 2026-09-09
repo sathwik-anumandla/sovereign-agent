@@ -14,25 +14,13 @@ import json
 import re
 from typing import Union, Generator, Dict, Any, Tuple, Optional, List
 import ollama
+from config_loader import get_model_registry, get_role_context_windows
 
-# Role -> Concrete Ollama Model Tag Registry
-MODEL_REGISTRY = {
-    "reasoning": "qwen3.5:4b-q4_K_M",
-    "vision": "qwen3.5:4b-q4_K_M",      # Shared with reasoning model -> 0s VRAM swap
-    "coding": "qwen2.5-coder:3b",
-    "ocr": "qwen2.5-vl:3b",
-    "vision_ocr": "qwen2.5-vl:3b",       # Dedicated Vision-OCR fallback model
-    "embedding": "nomic-embed-text"      # Embedding model for RAG KB
-}
+# Role -> Concrete Ollama Model Tag Registry (Loaded dynamically from models_config.json)
+MODEL_REGISTRY = get_model_registry()
 
-# Role -> Context Window Size (tokens) Registry
-ROLE_CONTEXT_WINDOWS = {
-    "reasoning": 8192,
-    "vision": 8192,
-    "coding": 8192,
-    "ocr": 8192,
-    "vision_ocr": 8192
-}
+# Role -> Context Window Size (tokens) Registry (Loaded dynamically from models_config.json)
+ROLE_CONTEXT_WINDOWS = get_role_context_windows()
 
 # Role-specific system prompts
 ROLE_SYSTEM_PROMPTS = {

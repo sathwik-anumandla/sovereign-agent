@@ -2,11 +2,11 @@
 tools/rbac.py (SIH PS 26117)
 ============================
 User Roles, Multi-User Isolation, RBAC Management, and Air-Gapped JWT Authentication.
-Provides zero-dependency PBKDF2 password hashing and HMAC-SHA256 JWT token verification.
+Provides zero-dependency PBKDF2 password hashing, HMAC-SHA256 JWT token verification,
+and PostgreSQL backend persistence.
 """
 
 import os
-import sqlite3
 import secrets
 import time
 import json
@@ -17,7 +17,8 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-DB_PATH = Path("workbench_checkpoints.db")
+from tools.db import execute_query, get_db_connection
+
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "sovereign_agent_air_gapped_jwt_secret_key_2026")
 LEGACY_SALT = "sovereign_pbkdf2_salt_airgap"
 
@@ -78,7 +79,6 @@ def decode_jwt_token(token: str) -> Optional[Dict[str, Any]]:
         signing_input = f"{b64_header}.{b64_payload}".encode("utf-8")
         expected_sig = hmac.new(SECRET_KEY.encode("utf-8"), signing_input, hashlib.sha256).digest()
 
-        # Add padding back if necessary
         sig_padded = b64_signature + "=" * (-len(b64_signature) % 4)
         actual_sig = base64.urlsafe_b64decode(sig_padded)
 
@@ -129,74 +129,42 @@ DEFAULT_USERS = [
 ]
 
 
-def init_rbac_db(db_path: Path = DB_PATH):
-    """Initializes sqlite RBAC tables (users, thread_users) and seeds default accounts with passwords."""
+def init_rbac_db(db_path: Any = None):
+    """Ensures PostgreSQL default user accounts exist and 2FA columns are migrated."""
     try:
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
+        execute_query("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(128);", commit=True)
+        execute_query("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT FALSE;", commit=True)
+        execute_query("ALTER TABLE users ADD COLUMN IF NOT EXISTS backup_codes TEXT;", commit=True)
 
-        # 1. Users table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id TEXT PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                name TEXT NOT NULL,
-                role TEXT NOT NULL,
-                department TEXT,
-                avatar_color TEXT,
-                password_hash TEXT,
-                created_at TEXT
-            )
-        """)
-
-        # Migration check: Ensure password_hash column exists
-        cursor.execute("PRAGMA table_info(users)")
-        columns = [col[1] for col in cursor.fetchall()]
-        if "password_hash" not in columns:
-            cursor.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
-
-        # 2. Thread ownership table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS thread_users (
-                thread_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                created_at TEXT,
-                FOREIGN KEY (user_id) REFERENCES users (user_id)
-            )
-        """)
-
-        # Seed default users if table is empty or missing password_hash
-        now_str = time.strftime("%Y-%m-%d %H:%M:%S")
         for u in DEFAULT_USERS:
             pwd_hash = hash_password(u["password"])
-            cursor.execute(
+            execute_query(
                 """
-                INSERT INTO users (user_id, username, name, role, department, avatar_color, password_hash, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET password_hash=excluded.password_hash
+                INSERT INTO users (user_id, username, name, role, department, avatar_color, password_hash)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_id) DO NOTHING
                 """,
-                (u["user_id"], u["username"], u["name"], u["role"], u["department"], u["avatar_color"], pwd_hash, now_str)
+                (u["user_id"], u["username"], u["name"], u["role"], u["department"], u["avatar_color"], pwd_hash),
+                commit=True
             )
-        conn.commit()
-        conn.close()
     except Exception as e:
-        logging.error(f"Error initializing RBAC SQLite tables: {e}")
+        logging.error(f"Error seeding RBAC default accounts in PostgreSQL: {e}")
 
 
-def authenticate_user(username: str, password: str, db_path: Path = DB_PATH) -> Optional[Dict[str, Any]]:
-    """Authenticates username and password against SQLite database."""
-    init_rbac_db(db_path)
+def authenticate_user(username: str, password: str, db_path: Any = None) -> Optional[Dict[str, Any]]:
+    """Authenticates username and password against PostgreSQL database."""
+    init_rbac_db()
     try:
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
-        cursor.execute("SELECT user_id, username, name, role, department, avatar_color, password_hash FROM users WHERE username = ?", (username,))
-        row = cursor.fetchone()
-        conn.close()
+        row = execute_query(
+            "SELECT user_id, username, name, role, department, avatar_color, password_hash, totp_enabled FROM users WHERE username = %s",
+            (username,),
+            fetch_one=True
+        )
 
         if not row:
             return None
 
-        uid, uname, name, role, dept, avatar, pwd_hash = row
+        uid, uname, name, role, dept, avatar, pwd_hash, totp_enabled = row
         if verify_password(password, pwd_hash or ""):
             return {
                 "user_id": uid,
@@ -204,7 +172,8 @@ def authenticate_user(username: str, password: str, db_path: Path = DB_PATH) -> 
                 "name": name,
                 "role": role,
                 "department": dept,
-                "avatar_color": avatar
+                "avatar_color": avatar,
+                "totp_enabled": bool(totp_enabled) if totp_enabled is not None else False
             }
         return None
     except Exception as e:
@@ -212,21 +181,24 @@ def authenticate_user(username: str, password: str, db_path: Path = DB_PATH) -> 
         return None
 
 
-def get_all_users(db_path: Path = DB_PATH) -> List[Dict[str, Any]]:
-    """Returns list of registered users with thread counts."""
-    init_rbac_db(db_path)
+def get_all_users(db_path: Any = None) -> List[Dict[str, Any]]:
+    """Returns list of registered users with thread counts from PostgreSQL."""
+    init_rbac_db()
     try:
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT user_id, username, name, role, department, avatar_color, created_at FROM users")
-        rows = cursor.fetchall()
+        rows = execute_query(
+            "SELECT user_id, username, name, role, department, avatar_color, created_at, totp_enabled FROM users",
+            fetch_all=True
+        ) or []
 
         users = []
         for r in rows:
             uid = r[0]
-            cursor.execute("SELECT COUNT(*) FROM thread_users WHERE user_id = ?", (uid,))
-            t_cnt = cursor.fetchone()[0]
+            t_cnt_res = execute_query(
+                "SELECT COUNT(*) FROM threads WHERE user_id = %s",
+                (uid,),
+                fetch_one=True
+            )
+            t_cnt = t_cnt_res[0] if t_cnt_res else 0
             users.append({
                 "user_id": uid,
                 "username": r[1],
@@ -234,17 +206,17 @@ def get_all_users(db_path: Path = DB_PATH) -> List[Dict[str, Any]]:
                 "role": r[3],
                 "department": r[4],
                 "avatar_color": r[5],
-                "created_at": r[6],
+                "created_at": str(r[6]) if r[6] else None,
+                "totp_enabled": bool(r[7]) if len(r) > 7 and r[7] is not None else False,
                 "thread_count": t_cnt
             })
-        conn.close()
         return users
     except Exception as e:
         logging.error(f"Error getting users: {e}")
         return DEFAULT_USERS
 
 
-def get_user_by_id(user_id: str, db_path: Path = DB_PATH) -> Optional[Dict[str, Any]]:
+def get_user_by_id(user_id: str, db_path: Any = None) -> Optional[Dict[str, Any]]:
     """Fetches a user profile by user_id."""
     users = get_all_users(db_path)
     for u in users:
@@ -260,25 +232,20 @@ def create_new_user(
     role: str = "user",
     department: str = "General Engineering",
     avatar_color: str = "bg-blue-500",
-    db_path: Path = DB_PATH
+    db_path: Any = None
 ) -> Dict[str, Any]:
     """Creates a new user account (Admin functionality)."""
-    init_rbac_db(db_path)
     user_id = username.lower().strip()
     pwd_hash = hash_password(password)
-    now_str = time.strftime("%Y-%m-%d %H:%M:%S")
 
-    conn = sqlite3.connect(str(db_path))
-    cursor = conn.cursor()
-    cursor.execute(
+    execute_query(
         """
-        INSERT INTO users (user_id, username, name, role, department, avatar_color, password_hash, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (user_id, username, name, role, department, avatar_color, password_hash)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
-        (user_id, username, name, role, department, avatar_color, pwd_hash, now_str)
+        (user_id, username, name, role, department, avatar_color, pwd_hash),
+        commit=True
     )
-    conn.commit()
-    conn.close()
     return {
         "user_id": user_id,
         "username": username,
@@ -286,73 +253,114 @@ def create_new_user(
         "role": role,
         "department": department,
         "avatar_color": avatar_color,
-        "created_at": now_str
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
     }
 
 
-def change_user_password(user_id: str, old_password: str, new_password: str, db_path: Path = DB_PATH) -> bool:
-    """Verifies old password and updates user password hash in SQLite database."""
-    init_rbac_db(db_path)
-    conn = sqlite3.connect(str(db_path))
-    cursor = conn.cursor()
-    cursor.execute("SELECT password_hash FROM users WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
+def change_user_password(user_id: str, old_password: str, new_password: str, db_path: Any = None) -> bool:
+    """Verifies old password and updates user password hash in PostgreSQL database."""
+    row = execute_query(
+        "SELECT password_hash FROM users WHERE user_id = %s",
+        (user_id,),
+        fetch_one=True
+    )
 
     if not row:
-        conn.close()
         raise ValueError("User account not found")
 
     pwd_hash = row[0]
     if not verify_password(old_password, pwd_hash or ""):
-        conn.close()
         raise ValueError("Incorrect current password")
 
     new_hash = hash_password(new_password)
-    cursor.execute("UPDATE users SET password_hash = ? WHERE user_id = ?", (new_hash, user_id))
-    conn.commit()
-    conn.close()
+    execute_query(
+        "UPDATE users SET password_hash = %s WHERE user_id = %s",
+        (new_hash, user_id),
+        commit=True
+    )
     return True
 
 
+def delete_user_account(user_id: str) -> bool:
+    """Deletes a user account and associated threads/files from PostgreSQL database."""
+    if user_id.lower() == "admin":
+        raise ValueError("System Administrator account 'admin' cannot be deleted")
 
-def link_thread_to_user(thread_id: str, user_id: str, db_path: Path = DB_PATH):
-    """Links a thread_id to a specific user_id."""
-    init_rbac_db(db_path)
+    user = get_user_by_id(user_id)
+    if not user:
+        raise ValueError(f"User account '{user_id}' not found")
+
+    # Fetch and delete user threads
+    threads = execute_query("SELECT thread_id FROM threads WHERE user_id = %s", (user_id,), fetch_all=True) or []
+    for t in threads:
+        tid = t[0]
+        execute_query("DELETE FROM checkpoints WHERE thread_id = %s", (tid,), commit=True)
+        execute_query("DELETE FROM checkpoint_writes WHERE thread_id = %s", (tid,), commit=True)
+        execute_query("DELETE FROM checkpoint_blobs WHERE thread_id = %s", (tid,), commit=True)
+        execute_query("DELETE FROM messages WHERE thread_id = %s", (tid,), commit=True)
+        execute_query("DELETE FROM file_metadata WHERE thread_id = %s", (tid,), commit=True)
+        execute_query("DELETE FROM threads WHERE thread_id = %s", (tid,), commit=True)
+
+    # Delete user record
+    execute_query("DELETE FROM users WHERE user_id = %s", (user_id,), commit=True)
+    return True
+
+
+def link_thread_to_user(thread_id: str, user_id: str, db_path: Any = None):
+    """Links a thread_id to a specific user_id in threads table."""
     try:
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
-        now_str = time.strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute(
-            "INSERT OR REPLACE INTO thread_users (thread_id, user_id, created_at) VALUES (?, ?, ?)",
-            (thread_id, user_id, now_str)
+        execute_query(
+            """
+            INSERT INTO threads (thread_id, user_id, title)
+            VALUES (%s, %s, 'New Conversation')
+            ON CONFLICT (thread_id) DO UPDATE SET user_id = EXCLUDED.user_id
+            """,
+            (thread_id, user_id),
+            commit=True
         )
-        conn.commit()
-        conn.close()
     except Exception as e:
         logging.error(f"Error linking thread '{thread_id}' to user '{user_id}': {e}")
 
 
-def get_thread_user_map(db_path: Path = DB_PATH) -> Dict[str, str]:
-    """Returns mapping of thread_id -> user_id."""
-    init_rbac_db(db_path)
+def update_thread_title(thread_id: str, title: str, only_if_default: bool = True):
+    """Updates title of thread in PostgreSQL threads table."""
     try:
-        conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
-        cursor.execute("SELECT thread_id, user_id FROM thread_users")
-        rows = cursor.fetchall()
-        conn.close()
+        clean_title = title.strip()[:60] if title else "New Conversation"
+        if only_if_default:
+            execute_query(
+                """
+                UPDATE threads 
+                SET title = %s, updated_at = CURRENT_TIMESTAMP 
+                WHERE thread_id = %s AND (title IS NULL OR title = '' OR title = 'New Conversation')
+                """,
+                (clean_title, thread_id),
+                commit=True
+            )
+        else:
+            execute_query(
+                "UPDATE threads SET title = %s, updated_at = CURRENT_TIMESTAMP WHERE thread_id = %s",
+                (clean_title, thread_id),
+                commit=True
+            )
+    except Exception as e:
+        logging.error(f"Error updating title for thread '{thread_id}': {e}")
+
+
+def get_thread_user_map(db_path: Any = None) -> Dict[str, str]:
+    """Returns mapping of thread_id -> user_id."""
+    try:
+        rows = execute_query("SELECT thread_id, user_id FROM threads", fetch_all=True) or []
         return {r[0]: r[1] for r in rows}
     except Exception as e:
         logging.error(f"Error getting thread_user map: {e}")
         return {}
 
 
-def get_admin_audit_metrics(db_path: Path = DB_PATH) -> Dict[str, Any]:
+def get_admin_audit_metrics(db_path: Any = None) -> Dict[str, Any]:
     """Returns comprehensive system metrics for Admin Panel view."""
-    init_rbac_db(db_path)
     users = get_all_users(db_path)
 
-    workspace_dir = Path("workspaces")
+    workspace_dir = Path("workspace")
     total_bytes = 0
     total_files = 0
     if workspace_dir.exists():
