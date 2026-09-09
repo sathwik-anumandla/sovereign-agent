@@ -201,6 +201,44 @@ export default function App() {
     }
   };
 
+  const handleRenameThread = async (threadId, newTitle) => {
+    if (!token || !newTitle || !newTitle.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE}/threads/${threadId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ title: newTitle.trim() })
+      });
+      if (res.ok) {
+        setThreads((prev) =>
+          prev.map((t) =>
+            t.thread_id === threadId
+              ? { ...t, title: newTitle.trim(), preview: newTitle.trim() }
+              : t
+          )
+        );
+      }
+    } catch (err) {
+      console.error(`Error renaming thread ${threadId}:`, err);
+    }
+  };
+
+  // Global ESC key listener to close active modals
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowKbModal(false);
+        setShowAdminModal(false);
+        setShow2faModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const handleSelectThread = async (threadId, authToken = token) => {
     if (!authToken) return;
     setActiveThreadId(threadId);
@@ -553,6 +591,7 @@ export default function App() {
         onSelectThread={(id) => handleSelectThread(id, token)}
         onNewThread={handleNewThread}
         onDeleteThread={handleDeleteThread}
+        onRenameThread={handleRenameThread}
         onOpenKbModal={() => setShowKbModal(true)}
         onOpenAdminModal={() => setShowAdminModal(true)}
         onOpen2faModal={() => setShow2faModal(true)}

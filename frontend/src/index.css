@@ -10,125 +10,124 @@
 /* ==============================================================================
    SOVEREIGN AGENT THEME PALETTE & UX CONFIGURATION
    ==============================================================================
-   User Palette Tokens (4-Color Strict Specification):
-     - #181C14 (Deep Dark Obsidian / Main Application Background Base)
-     - #3C3D37 (Dark Slate Charcoal / Sidebar, Header & Input Background)
-     - #697565 (Muted Sage-Olive Green / Cards, Borders & Highlights)
-     - #ECDFCC (Warm Cream Sand / Primary Text, Icons, Headers & Buttons)
+   User Palette Tokens (OLED Pitch Black Monochrome Specification):
+     - #000000 (Pure Pitch Black / Main Application Background Base)
+     - #161616 (Deep Charcoal / Sidebar, Header, Cards & Input Background)
+     - #525252 (Mid Gray / Borders, Highlights & Muted Details)
+     - #FFFFFF (Pure White / Primary Text, Headers & Accent Buttons)
    ============================================================================== */
 
 :root {
   /* Raw Palette Tokens */
-  --palette-obsidian-dark: #181C14;
-  --palette-slate-charcoal: #3C3D37;
-  --palette-sage-olive: #697565;
-  --palette-cream-sand: #ECDFCC;
+  --palette-obsidian-dark: #000000;
+  --palette-slate-charcoal: #161616;
+  --palette-sage-olive: #525252;
+  --palette-cream-sand: #FFFFFF;
 
   /* Compatibility Aliases */
-  --palette-slate-dark: #3C3D37;
-  --palette-steel-blue: #697565;
-  --palette-warm-sand: #ECDFCC;
-  --palette-ivory-light: #ECDFCC;
+  --palette-slate-dark: #161616;
+  --palette-steel-blue: #525252;
+  --palette-warm-sand: #FFFFFF;
+  --palette-ivory-light: #FFFFFF;
 
   /* Theme Variables */
-  --bg-app: #181C14;
-  --bg-sidebar: #22261E;
-  --bg-header: rgba(24, 28, 20, 0.92);
-  --bg-card: #2B2F26;
-  --bg-input: #2B2F26;
-  --bg-hover: #383D33;
-  --bg-user-chip: #2B2F26;
+  --bg-app: #000000;
+  --bg-sidebar: #0D0D0D;
+  --bg-header: rgba(0, 0, 0, 0.92);
+  --bg-card: #161616;
+  --bg-input: #161616;
+  --bg-hover: #262626;
+  --bg-user-chip: #161616;
 
-  --border-main: rgba(105, 117, 101, 0.35);
-  --border-muted: rgba(105, 117, 101, 0.20);
-  --border-focus: #ECDFCC;
+  --border-main: transparent;
+  --border-muted: transparent;
+  --border-focus: transparent;
 
-  --text-primary: #ECDFCC;
-  --text-secondary: #D4C6B3;
-  --text-muted: #9BA597;
-  --text-accent: #ECDFCC;
+  --text-primary: #FFFFFF;
+  --text-secondary: #D4D4D4;
+  --text-muted: #8E8E8E;
+  --text-accent: #FFFFFF;
 
-  --accent-badge-bg: #3C3D37;
-  --accent-badge-border: #697565;
-  --accent-badge-text: #ECDFCC;
+  --accent-badge-bg: #161616;
+  --accent-badge-border: transparent;
+  --accent-badge-text: #FFFFFF;
 
-  --user-avatar-bg: #697565;
-  --agent-avatar-bg: #181C14;
+  --user-avatar-bg: #525252;
+  --agent-avatar-bg: #000000;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.55);
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
 
-  --scrollbar-thumb: #697565;
-  --scrollbar-thumb-hover: #ECDFCC;
+  --scrollbar-thumb: #525252;
+  --scrollbar-thumb-hover: #FFFFFF;
 }
 
 [data-theme="light"] {
-  /* Light Theme Palette Tokens: #FBF7F0, #D9E4DD, #CDC9C3, #555555 */
-  --bg-app: #FBF7F0;
-  --bg-sidebar: #ECE7DF;
-  --bg-header: rgba(251, 247, 240, 0.92);
-  --bg-card: #E4DFD7;
-  --bg-input: #E4DFD7;
-  --bg-hover: #D8D2C8;
-  --bg-user-chip: #E4DFD7;
+  --bg-app: #FFFFFF;
+  --bg-sidebar: #F5F5F5;
+  --bg-header: rgba(255, 255, 255, 0.92);
+  --bg-card: #E5E5E5;
+  --bg-input: #E5E5E5;
+  --bg-hover: #D4D4D4;
+  --bg-user-chip: #E5E5E5;
 
-  --border-main: rgba(85, 85, 85, 0.25);
-  --border-muted: rgba(85, 85, 85, 0.15);
-  --border-focus: #3C3D37;
+  --border-main: transparent;
+  --border-muted: transparent;
+  --border-focus: transparent;
 
-  --text-primary: #2B2B2B;
-  --text-secondary: #444444;
-  --text-muted: #666666;
-  --text-accent: #111111;
+  --text-primary: #000000;
+  --text-secondary: #262626;
+  --text-muted: #737373;
+  --text-accent: #000000;
 
-  --accent-badge-bg: #D9E4DD;
-  --accent-badge-border: #CDC9C3;
-  --accent-badge-text: #333333;
+  --accent-badge-bg: #F5F5F5;
+  --accent-badge-border: transparent;
+  --accent-badge-text: #000000;
 
-  --user-avatar-bg: #CDC9C3;
-  --agent-avatar-bg: #D9E4DD;
+  --user-avatar-bg: #525252;
+  --agent-avatar-bg: #E5E5E5;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.15);
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
 
-  --scrollbar-thumb: #CDC9C3;
-  --scrollbar-thumb-hover: #555555;
+  --scrollbar-thumb: #525252;
+  --scrollbar-thumb-hover: #000000;
 }
 
 [data-theme="dark"] {
-  /* Dark Theme Palette Tokens: #181C14, #3C3D37, #697565, #ECDFCC */
-  --bg-app: #181C14;
-  --bg-sidebar: #22261E;
-  --bg-header: rgba(24, 28, 20, 0.92);
-  --bg-card: #2B2F26;
-  --bg-input: #2B2F26;
-  --bg-hover: #383D33;
-  --bg-user-chip: #2B2F26;
+  /* Dark Theme Palette Tokens: #000000, #161616, #525252, #FFFFFF */
+  --bg-app: #000000;
+  --bg-sidebar: #0D0D0D;
+  --bg-header: rgba(0, 0, 0, 0.92);
+  --bg-card: #161616;
+  --bg-input: #161616;
+  --bg-hover: #262626;
+  --bg-user-chip: #161616;
 
-  --border-main: rgba(105, 117, 101, 0.35);
-  --border-muted: rgba(105, 117, 101, 0.20);
-  --border-focus: #ECDFCC;
+  --border-main: transparent;
+  --border-muted: transparent;
+  --border-focus: transparent;
 
-  --text-primary: #ECDFCC;
-  --text-secondary: #D4C6B3;
-  --text-muted: #9BA597;
-  --text-accent: #ECDFCC;
+  --text-primary: #FFFFFF;
+  --text-secondary: #D4D4D4;
+  --text-muted: #8E8E8E;
+  --text-accent: #FFFFFF;
 
-  --accent-badge-bg: #3C3D37;
-  --accent-badge-border: #697565;
-  --accent-badge-text: #ECDFCC;
+  --accent-badge-bg: #161616;
+  --accent-badge-border: transparent;
+  --accent-badge-text: #FFFFFF;
 
-  --user-avatar-bg: #697565;
-  --agent-avatar-bg: #181C14;
+  --user-avatar-bg: #525252;
+  --agent-avatar-bg: #000000;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.55);
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
 
-  --scrollbar-thumb: #697565;
-  --scrollbar-thumb-hover: #ECDFCC;
+  --scrollbar-thumb: #525252;
+  --scrollbar-thumb-hover: #FFFFFF;
 }
 
 @layer base {
@@ -150,21 +149,21 @@
 
 /* Custom Theme Classes */
 .app-bg { background-color: var(--bg-app); color: var(--text-primary); }
-.sidebar-bg { background-color: var(--bg-sidebar); border-color: var(--border-main); }
-.header-bg { background-color: var(--bg-header); border-color: var(--border-main); backdrop-filter: blur(12px); }
-.card-bg { background-color: var(--bg-card); border-color: var(--border-main); color: var(--text-primary); }
-.input-bg { background-color: var(--bg-input); border-color: var(--border-main); color: var(--text-primary); }
+.sidebar-bg { background-color: var(--bg-sidebar); border: none; }
+.header-bg { background-color: var(--bg-header); border: none; backdrop-filter: blur(12px); }
+.card-bg { background-color: var(--bg-card); border: none; color: var(--text-primary); }
+.input-bg { background-color: var(--bg-input); border: none; color: var(--text-primary); }
 
 .theme-text-primary { color: var(--text-primary); }
 .theme-text-secondary { color: var(--text-secondary); }
 .theme-text-muted { color: var(--text-muted); }
 .theme-text-accent { color: var(--text-accent); }
-.theme-border { border-color: var(--border-main); }
+.theme-border { border: none; }
 
 /* Markdown styling overrides using theme variables */
 .markdown-body h1, .markdown-body h2, .markdown-body h3 {
   color: var(--text-primary);
-  border-color: var(--border-muted);
+  border: none;
 }
 .markdown-body p, .markdown-body li {
   color: var(--text-primary);
@@ -179,22 +178,22 @@
   color: var(--text-accent);
 }
 .markdown-body blockquote {
-  border-color: var(--palette-sage-olive);
+  border: none;
+  padding-left: 0.75rem;
   color: var(--text-muted);
 }
 .markdown-body table {
-  border-color: var(--border-main);
-  box-shadow: var(--shadow-sm);
+  border: none;
   border-radius: 0.5rem;
   overflow: hidden;
 }
 .markdown-body table th {
   background-color: var(--bg-input);
-  border-color: var(--border-main);
+  border: none;
   color: var(--text-primary);
 }
 .markdown-body table td {
-  border-color: var(--border-main);
+  border: none;
   color: var(--text-primary);
 }
 

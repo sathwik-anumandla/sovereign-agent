@@ -19,10 +19,19 @@ The **Sovereign On-Premise Agentic AI Workbench** is a 100% air-gapped, confiden
 - **Confidence-Gated OCR & VLM Fallback**: Layout-aware document transcription using PaddleOCR (PP-Structure) with dynamic fallbacks to Vision-Language Models (VLM).
 - **RAG & Enterprise Knowledge Base**: High-performance `pgvector` similarity search for on-the-fly ingestion, section-aware chunking, and source-cited retrieval.
 - **7 Standalone Audited Tools**: SymPy math solver, Python code execution sandbox, pandas tabular data engine, document deliverable generator (`.docx`, `.pptx`, `.xlsx`), workspace file I/O, OCR/VLM, and RAG search.
-- **Minimalist Industrial UI**: Anthropic Claude-inspired interface with dark and light theme palettes, real-time SSE streaming steppers, 2FA management modal, and enterprise RBAC user controls.
+- **Minimalist OLED Monochrome UI**: Anthropic Claude-inspired interface featuring an OLED Pitch Black monochrome design system (`#000000`, `#161616`, `#525252`, `#FFFFFF`), clean consolidated profile popover menu, icon-only controls, in-app file preview modal (images, PDFs, code, text, audio, video), real-time SSE streaming steppers, 2FA management, and enterprise RBAC controls.
 
 --- 
-## Deep-Dive Documentation Index
+## UI Color Philosophy & Design System
+
+The workbench UI follows a strict **4-Token OLED Pitch Black Monochrome Design Philosophy**:
+
+| Token Name | Hex Code | Role & Application Scope |
+| :--- | :--- | :--- |
+| **Obsidian Base** | `#000000` | True Pitch Black application background base (`--bg-app`) & agent avatar container. |
+| **Deep Charcoal** | `#161616` | Sidebar, top header bar, modal cards, input containers, user chips (`--bg-card`, `--bg-input`, `--bg-sidebar`). |
+| **Mid Gray** | `#525252` | Structural borders, muted text, status badges, scrollbar thumbs (`--border-main`, `--text-muted`, `--scrollbar-thumb`). |
+| **Pure White** | `#FFFFFF` | Primary typography, icons, active state indicators, focus borders, primary buttons (`--text-primary`, `--palette-warm-sand`). |
 
 For detailed architectural and deployment guides, refer to the documentation in [`docs/`](docs/):
 

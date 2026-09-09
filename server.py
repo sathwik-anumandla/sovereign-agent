@@ -15,6 +15,7 @@ import time
 import logging
 import asyncio
 import datetime
+import mimetypes
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -646,6 +647,22 @@ def delete_thread(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.patch("/api/threads/{thread_id}")
+@app.patch("/threads/{thread_id}")
+def rename_thread(
+    thread_id: str,
+    payload: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Updates title for a conversation thread in PostgreSQL database."""
+    new_title = payload.get("title", "").strip()
+    if not new_title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+
+    update_thread_title(thread_id, new_title, only_if_default=False)
+    return {"status": "success", "thread_id": thread_id, "title": new_title}
+
+
 # ============================================================================
 # 4. FILE UPLOAD & DISK PERSISTENCE ENDPOINTS
 # ============================================================================
@@ -707,7 +724,7 @@ def download_workspace_file(
     filename: str,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """Downloads a deliverable or uploaded file from thread workspace or disk storage."""
+    """Serves a deliverable or uploaded file from thread workspace or disk storage with inline disposition for browser preview."""
     verify_thread_access(thread_id, current_user)
     try:
         file_path = validate_workspace_path(filename, thread_id)
@@ -727,7 +744,27 @@ def download_workspace_file(
                         raise HTTPException(status_code=404, detail=f"File '{filename}' not found.")
             else:
                 raise HTTPException(status_code=404, detail=f"File '{filename}' not found in workspace.")
-        return FileResponse(path=str(file_path), filename=filename)
+
+        media_type, _ = mimetypes.guess_type(str(file_path))
+        if not media_type:
+            lower_name = filename.lower()
+            if lower_name.endswith('.md'):
+                media_type = 'text/markdown'
+            elif lower_name.endswith('.py'):
+                media_type = 'text/x-python'
+            elif lower_name.endswith('.json'):
+                media_type = 'application/json'
+            elif lower_name.endswith('.log'):
+                media_type = 'text/plain'
+            else:
+                media_type = 'application/octet-stream'
+
+        return FileResponse(
+            path=str(file_path),
+            filename=filename,
+            media_type=media_type,
+            content_disposition_type="inline"
+        )
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
 

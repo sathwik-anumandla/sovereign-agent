@@ -145,11 +145,11 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 font-sans theme-text-primary">
-      <div className="w-full max-w-lg rounded-3xl card-bg p-6 shadow-2xl border border-[var(--border-muted)] space-y-5">
+      <div className="w-full max-w-lg rounded-3xl card-bg p-6 border-0 space-y-5">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[var(--border-muted)] pb-4">
+        <div className="flex items-center justify-between pb-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--bg-input)] theme-text-secondary">
               <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
@@ -175,7 +175,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
         )}
 
         {successMsg && (
-          <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 p-3 text-xs text-emerald-400 font-mono">
+          <div className="flex items-center gap-2 rounded-xl bg-[var(--bg-input)] p-3 text-xs theme-text-primary font-mono border-0">
             <ShieldCheck className="h-4 w-4 shrink-0" />
             <span>{successMsg}</span>
           </div>
@@ -184,12 +184,12 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
         {/* Initial Overview Screen */}
         {step === 'initial' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between rounded-2xl bg-[var(--bg-input)] p-4 border border-[var(--border-muted)]">
+            <div className="flex items-center justify-between rounded-2xl bg-[var(--bg-input)] p-4 border-0">
               <div className="flex items-center gap-3">
                 {isEnabled ? (
-                  <ShieldCheck className="h-6 w-6 text-emerald-400 shrink-0" />
+                  <ShieldCheck className="h-6 w-6 theme-text-primary shrink-0" />
                 ) : (
-                  <ShieldAlert className="h-6 w-6 text-amber-400 shrink-0" />
+                  <ShieldAlert className="h-6 w-6 theme-text-muted shrink-0" />
                 )}
                 <div>
                   <div className="text-sm font-semibold theme-text-primary">
@@ -202,9 +202,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
                   </div>
                 </div>
               </div>
-              <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase font-mono ${
-                isEnabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
-              }`}>
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase font-mono bg-[var(--bg-card)] theme-text-primary border-0">
                 {isEnabled ? 'ACTIVE' : 'INACTIVE'}
               </span>
             </div>
@@ -215,7 +213,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
                   type="button"
                   onClick={handleStartSetup}
                   disabled={loading}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-[var(--bg-input)] hover:bg-[var(--bg-hover)] theme-text-primary py-2.5 text-xs font-semibold border border-[var(--border-muted)] cursor-pointer transition-colors"
+                  className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-[var(--bg-input)] hover:bg-[var(--bg-hover)] theme-text-primary py-2.5 text-xs font-semibold border-0 cursor-pointer transition-colors"
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                   <span>Re-configure Authenticator</span>
@@ -223,7 +221,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
                 <button
                   type="button"
                   onClick={() => setStep('disable')}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 py-2.5 text-xs font-semibold border border-red-500/20 cursor-pointer transition-colors"
+                  className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-[var(--bg-input)] hover:bg-[var(--bg-hover)] theme-text-primary py-2.5 text-xs font-semibold border-0 cursor-pointer transition-colors"
                 >
                   <span>Disable 2FA</span>
                 </button>
@@ -233,7 +231,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
                 type="button"
                 onClick={handleStartSetup}
                 disabled={loading}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] py-3 text-xs font-bold shadow-md hover:opacity-90 transition-all border-0 cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] py-3 text-xs font-bold hover:opacity-90 transition-all border-0 cursor-pointer"
               >
                 <QrCode className="h-4 w-4" />
                 <span>{loading ? 'Generating Setup QR...' : 'Set Up TOTP 2FA Authenticator'}</span>
@@ -249,12 +247,12 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
               <div className="text-xs font-semibold theme-text-primary">
                 1. Scan QR Code in Authenticator App
               </div>
-              <div className="flex flex-col sm:flex-row items-center gap-4 rounded-2xl bg-[var(--bg-input)] p-4 border border-[var(--border-muted)]">
+              <div className="flex flex-col sm:flex-row items-center gap-4 rounded-2xl bg-[var(--bg-input)] p-4 border-0">
                 {qrCodeData.qr_code && (
                   <img
                     src={qrCodeData.qr_code}
                     alt="2FA TOTP QR Code"
-                    className="h-32 w-32 rounded-xl bg-white p-1 border border-gray-300 shrink-0"
+                    className="h-32 w-32 rounded-xl bg-white p-1 border-0 shrink-0"
                   />
                 )}
                 <div className="space-y-2 text-xs">
@@ -264,7 +262,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
                   <div className="space-y-1 font-mono">
                     <span className="text-[10px] theme-text-muted block">Secret Key (Manual Entry):</span>
                     <div className="flex items-center gap-2">
-                      <code className="bg-black/30 px-2 py-1 rounded text-[11px] text-amber-300 tracking-widest select-all">
+                      <code className="bg-black/30 px-2 py-1 rounded text-[11px] theme-text-primary tracking-widest select-all">
                         {qrCodeData.secret}
                       </code>
                       <button
@@ -273,7 +271,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
                         className="rounded p-1 theme-text-muted hover:theme-text-primary border-0 bg-transparent cursor-pointer"
                         title="Copy Secret"
                       >
-                        {copiedSecret ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                        {copiedSecret ? <Check className="h-3.5 w-3.5 theme-text-primary" /> : <Copy className="h-3.5 w-3.5" />}
                       </button>
                     </div>
                   </div>
@@ -286,7 +284,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-semibold theme-text-primary flex items-center gap-1.5">
-                    <KeyRound className="h-3.5 w-3.5 text-amber-400" />
+                    <KeyRound className="h-3.5 w-3.5 theme-text-secondary" />
                     <span>2. Single-Use Emergency Recovery Codes</span>
                   </div>
                   <button
@@ -294,11 +292,11 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
                     onClick={handleCopyBackupCodes}
                     className="flex items-center gap-1 text-[10px] theme-text-muted hover:theme-text-primary border-0 bg-transparent cursor-pointer font-mono"
                   >
-                    {copiedCodes ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                    {copiedCodes ? <Check className="h-3 w-3 theme-text-primary" /> : <Copy className="h-3 w-3" />}
                     <span>{copiedCodes ? 'Copied' : 'Copy All'}</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-2 gap-1.5 rounded-2xl bg-black/30 p-3 font-mono text-[11px] text-emerald-400 border border-[var(--border-muted)]">
+                <div className="grid grid-cols-2 gap-1.5 rounded-2xl bg-black/30 p-3 font-mono text-[11px] theme-text-primary border-0">
                   {qrCodeData.backup_codes.map((code, i) => (
                     <div key={i} className="bg-white/5 px-2 py-1 rounded text-center font-bold tracking-wider">
                       {code}
@@ -312,7 +310,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
             )}
 
             {/* Verification Code Confirmation Input */}
-            <div className="space-y-2 pt-2 border-t border-[var(--border-muted)]">
+            <div className="space-y-2 pt-2">
               <label className="text-xs font-semibold theme-text-primary block">
                 3. Verify 6-Digit Authenticator Code
               </label>
@@ -329,7 +327,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
                 <button
                   type="submit"
                   disabled={loading || verifyCode.length < 6}
-                  className="rounded-xl bg-emerald-600 text-white px-5 text-xs font-bold hover:bg-emerald-500 transition-colors border-0 cursor-pointer disabled:opacity-50"
+                  className="rounded-xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] px-5 text-xs font-bold hover:opacity-90 transition-all border-0 cursor-pointer disabled:opacity-50"
                 >
                   {loading ? 'Activating...' : 'Activate 2FA'}
                 </button>
@@ -380,7 +378,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, token, currentUser
               <button
                 type="submit"
                 disabled={loading || !disablePassword || !disableCode}
-                className="flex-1 rounded-xl bg-red-600 text-white py-2.5 text-xs font-bold hover:bg-red-500 border-0 cursor-pointer disabled:opacity-50"
+                className="flex-1 rounded-xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] py-2.5 text-xs font-bold hover:opacity-90 transition-all border-0 cursor-pointer disabled:opacity-50"
               >
                 {loading ? 'Disabling...' : 'Confirm & Disable 2FA'}
               </button>

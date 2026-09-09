@@ -84,7 +84,7 @@ export default function AgenticWorkflowStepper({
 
       {/* Expanded Real-Time Text List (No Numbers, No Cards, Plain Muted Font) */}
       {isExpanded && (
-        <div className="mt-2.5 ml-1 space-y-2 border-l border-[var(--border-muted)] pl-3 text-sm theme-text-muted font-mono">
+        <div className="mt-2.5 ml-1 space-y-2 pl-3 text-sm theme-text-muted font-mono">
           {modelRole ? (
             <>
               <div>
@@ -136,7 +136,7 @@ export default function AgenticWorkflowStepper({
                 </button>
 
                 {isToolExpanded && (
-                  <div className="mt-1 ml-3 space-y-1 text-xs theme-text-muted border-l border-[var(--border-muted)] pl-2 font-mono">
+                  <div className="mt-1 ml-3 space-y-1 text-xs theme-text-muted pl-2 font-mono">
                     {tc.output_summary && (
                       <div>{tc.output_summary}</div>
                     )}

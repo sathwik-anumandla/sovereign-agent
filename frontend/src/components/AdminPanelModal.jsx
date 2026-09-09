@@ -80,11 +80,11 @@ export default function AdminPanelModal({ isOpen, onClose, token }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-      <div className="w-full max-w-3xl rounded-2xl card-bg p-6 shadow-2xl border-0 theme-text-primary space-y-5 max-h-[88vh] flex flex-col">
+      <div className="w-full max-w-3xl rounded-2xl card-bg p-6 border-0 theme-text-primary space-y-5 max-h-[88vh] flex flex-col">
         {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-[var(--border-muted)] pb-3">
+        <div className="flex items-center justify-between pb-3">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/20 text-blue-400">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--bg-input)] theme-text-secondary border-0">
               <ShieldCheck className="h-5 w-5" />
             </div>
             <div>
@@ -113,10 +113,10 @@ export default function AdminPanelModal({ isOpen, onClose, token }) {
           <div className="space-y-4 overflow-y-auto pr-1">
             {/* Top Stat Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="rounded-xl bg-[var(--bg-input)] p-3 shadow-sm border-0">
+              <div className="rounded-xl bg-[var(--bg-input)] p-3 border-0">
                 <div className="flex items-center justify-between text-xs theme-text-muted mb-1">
                   <span>Users</span>
-                  <Users className="h-3.5 w-3.5 text-blue-400" />
+                  <Users className="h-3.5 w-3.5 theme-text-secondary" />
                 </div>
                 <div className="text-xl font-bold font-mono theme-text-primary">
                   {metrics?.total_users || 0}
@@ -124,10 +124,10 @@ export default function AdminPanelModal({ isOpen, onClose, token }) {
                 <div className="text-[10px] theme-text-muted mt-0.5">SQLite RBAC User DB</div>
               </div>
 
-              <div className="rounded-xl bg-[var(--bg-input)] p-3 shadow-sm border-0">
+              <div className="rounded-xl bg-[var(--bg-input)] p-3 border-0">
                 <div className="flex items-center justify-between text-xs theme-text-muted mb-1">
                   <span>Conversations</span>
-                  <Database className="h-3.5 w-3.5 text-emerald-400" />
+                  <Database className="h-3.5 w-3.5 theme-text-secondary" />
                 </div>
                 <div className="text-xl font-bold font-mono theme-text-primary">
                   {metrics?.total_threads || 0}
@@ -135,7 +135,7 @@ export default function AdminPanelModal({ isOpen, onClose, token }) {
                 <div className="text-[10px] theme-text-muted mt-0.5">SQLite Checkpoint DB</div>
               </div>
 
-              <div className="rounded-xl bg-[var(--bg-input)] p-3 shadow-sm border-0">
+              <div className="rounded-xl bg-[var(--bg-input)] p-3 border-0">
                 <div className="flex items-center justify-between text-xs theme-text-muted mb-1">
                   <span>Workspace Storage</span>
                   <HardDrive className="h-3.5 w-3.5 text-amber-400" />
@@ -146,7 +146,7 @@ export default function AdminPanelModal({ isOpen, onClose, token }) {
                 <div className="text-[10px] theme-text-muted mt-0.5">{metrics?.workspace_files_count || 0} files staged</div>
               </div>
 
-              <div className="rounded-xl bg-[var(--bg-input)] p-3 shadow-sm border-0">
+              <div className="rounded-xl bg-[var(--bg-input)] p-3 border-0">
                 <div className="flex items-center justify-between text-xs theme-text-muted mb-1">
                   <span>RAG Vector DB</span>
                   <Lock className="h-3.5 w-3.5 text-purple-400" />
@@ -159,7 +159,7 @@ export default function AdminPanelModal({ isOpen, onClose, token }) {
             </div>
 
             {/* User Roster Table & Create User Header */}
-            <div className="rounded-xl bg-[var(--bg-input)] p-4 shadow-sm border-0 space-y-3">
+            <div className="rounded-xl bg-[var(--bg-input)] p-4 border-0 space-y-3">
               <div className="flex items-center justify-between text-xs font-semibold theme-text-primary">
                 <span>Enterprise User Roster & RBAC Roles</span>
                 <button
@@ -268,7 +268,7 @@ export default function AdminPanelModal({ isOpen, onClose, token }) {
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-[var(--border-muted)] text-[11px] theme-text-muted">
+                    <tr className="text-[11px] theme-text-muted">
                       <th className="py-2 px-2 font-medium">User Profile</th>
                       <th className="py-2 px-2 font-medium">Department</th>
                       <th className="py-2 px-2 font-medium">RBAC Role</th>
@@ -277,7 +277,7 @@ export default function AdminPanelModal({ isOpen, onClose, token }) {
                   </thead>
                   <tbody>
                     {(metrics?.users || []).map((u) => (
-                      <tr key={u.user_id} className="border-b border-[var(--border-muted)]/50 hover:bg-[var(--bg-hover)] transition-colors">
+                      <tr key={u.user_id} className="hover:bg-[var(--bg-hover)] transition-colors">
                         <td className="py-2.5 px-2 font-medium theme-text-primary">
                           <div className="flex items-center gap-2">
                             <span className={`h-2.5 w-2.5 rounded-full ${u.avatar_color || 'bg-gray-400'}`}></span>
@@ -323,7 +323,7 @@ export default function AdminPanelModal({ isOpen, onClose, token }) {
         )}
 
         {/* Modal Footer */}
-        <div className="flex justify-end pt-2 border-t border-[var(--border-muted)]">
+        <div className="flex justify-end pt-2">
           <button
             type="button"
             onClick={onClose}

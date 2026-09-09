@@ -75,10 +75,10 @@ export default function LoginScreen({ onLoginSuccess }) {
 
   return (
     <div className="flex h-screen w-screen items-center justify-center app-bg p-4 theme-text-primary">
-      <div className="w-full max-w-md space-y-6 rounded-3xl card-bg p-8 shadow-2xl border-0">
+      <div className="w-full max-w-md space-y-6 rounded-3xl card-bg p-8 border-0">
         {/* Header Icon & Title */}
         <div className="text-center space-y-2">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] shadow-md border-0">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] border-0">
             <Sparkles className="h-7 w-7" />
           </div>
           <h2 className="text-2xl font-bold tracking-tight theme-text-primary">
@@ -101,7 +101,7 @@ export default function LoginScreen({ onLoginSuccess }) {
         {requires2FA ? (
           <form onSubmit={handleVerify2FA} className="space-y-4">
             <div className="space-y-1 text-center">
-              <div className="flex h-10 w-10 mx-auto items-center justify-center rounded-xl bg-blue-500/10 text-blue-400">
+              <div className="flex h-10 w-10 mx-auto items-center justify-center rounded-xl input-bg theme-text-secondary border-0">
                 <ShieldCheck className="h-5 w-5" />
               </div>
               <label className="text-xs font-bold theme-text-primary block pt-1">
@@ -127,7 +127,7 @@ export default function LoginScreen({ onLoginSuccess }) {
             <button
               type="submit"
               disabled={loading || !totpCode.trim()}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] py-3 text-xs font-bold shadow-md hover:opacity-90 transition-all border-0 cursor-pointer disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] py-3 text-xs font-bold hover:opacity-90 transition-all border-0 cursor-pointer disabled:opacity-50"
             >
               <span>{loading ? 'Verifying Code...' : 'Verify & Continue'}</span>
               {!loading && <ArrowRight className="h-4 w-4" />}
@@ -182,7 +182,7 @@ export default function LoginScreen({ onLoginSuccess }) {
             <button
               type="submit"
               disabled={loading || !username.trim() || !password.trim()}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] py-3 text-xs font-bold shadow-md hover:opacity-90 transition-all border-0 cursor-pointer disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] py-3 text-xs font-bold hover:opacity-90 transition-all border-0 cursor-pointer disabled:opacity-50"
             >
               <span>{loading ? 'Authenticating...' : 'Sign In to Sovereign Workbench'}</span>
               {!loading && <ArrowRight className="h-4 w-4" />}
@@ -191,7 +191,7 @@ export default function LoginScreen({ onLoginSuccess }) {
         )}
 
         {/* Quick Demo Login Preset Buttons */}
-        <div className="space-y-2 pt-2 border-t border-[var(--border-muted)]">
+        <div className="space-y-2 pt-2 border-0">
           <div className="text-[11px] font-semibold theme-text-muted text-center">
             Demo Test Accounts:
           </div>
@@ -222,7 +222,7 @@ export default function LoginScreen({ onLoginSuccess }) {
 
         {/* Air-Gap Security Footer Note */}
         <div className="flex items-center justify-center gap-1.5 text-[11px] theme-text-muted font-mono pt-2">
-          <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+          <ShieldCheck className="h-3.5 w-3.5 theme-text-muted" />
           <span>Air-Gapped HMAC JWT Auth · 0 Egress</span>
         </div>
       </div>

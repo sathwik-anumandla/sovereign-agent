@@ -19,11 +19,40 @@ import {
   Database,
   Sun,
   Moon,
-  ChevronDown
+  ChevronDown,
+  Download,
+  Eye
 } from 'lucide-react';
 import ToolCard from './ToolCard';
 import AgenticWorkflowStepper from './AgenticWorkflowStepper';
 import StatusStrip from './StatusStrip';
+
+function CopyResponseButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="pt-1 flex items-center text-xs theme-text-muted">
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="flex items-center justify-center rounded-md p-1 theme-text-muted hover:theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
+        title={copied ? "Copied" : "Copy response"}
+      >
+        {copied ? (
+          <Check className="h-3.5 w-3.5 text-emerald-400" />
+        ) : (
+          <Copy className="h-3.5 w-3.5" />
+        )}
+      </button>
+    </div>
+  );
+}
 
 function CodeBlock({ inline, className, children, ...props }) {
   const [copied, setCopied] = useState(false);
@@ -44,25 +73,19 @@ function CodeBlock({ inline, className, children, ...props }) {
   };
 
   return (
-    <div className="my-3 rounded-xl border-0 bg-[var(--bg-sidebar)] overflow-hidden font-mono text-sm shadow-sm">
+    <div className="my-3 rounded-xl border-0 bg-[var(--bg-sidebar)] overflow-hidden font-mono text-sm">
       <div className="flex items-center justify-between bg-[var(--bg-card)] px-3.5 py-2 border-0 text-xs theme-text-muted">
         <span className="font-medium lowercase tracking-wide theme-text-secondary">{match ? match[1] : 'code'}</span>
         <button
           type="button"
           onClick={handleCopy}
-          className="flex items-center gap-1.5 theme-text-muted hover:theme-text-primary transition-colors text-xs border-0 bg-transparent cursor-pointer"
-          title="Copy code"
+          className="flex items-center justify-center rounded p-1 theme-text-muted hover:theme-text-primary hover:bg-[var(--bg-hover)] transition-colors text-xs border-0 bg-transparent cursor-pointer"
+          title={copied ? "Copied" : "Copy code"}
         >
           {copied ? (
-            <>
-              <Check className="h-3.5 w-3.5 theme-text-primary" />
-              <span className="theme-text-primary font-medium">Copied!</span>
-            </>
+            <Check className="h-3.5 w-3.5 text-emerald-400" />
           ) : (
-            <>
-              <Copy className="h-3.5 w-3.5" />
-              <span>Copy code</span>
-            </>
+            <Copy className="h-3.5 w-3.5" />
           )}
         </button>
       </div>
@@ -75,21 +98,156 @@ function CodeBlock({ inline, className, children, ...props }) {
   );
 }
 
+function FilePreviewModal({ file, onClose }) {
+  const [textData, setTextData] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const filename = file?.filename || 'File Preview';
+  const url = file?.url;
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+
+  const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext);
+  const isPdf = ext === 'pdf';
+  const isAudio = ['mp3', 'wav', 'ogg', 'm4a'].includes(ext);
+  const isVideo = ['mp4', 'webm', 'ogv'].includes(ext);
+  const isTextLike = ['txt', 'py', 'js', 'jsx', 'ts', 'tsx', 'json', 'md', 'csv', 'log', 'yaml', 'yml', 'html', 'css', 'sh', 'env', 'sql', 'c', 'cpp', 'java', 'go', 'rs', 'rb', 'php'].includes(ext);
+
+  useEffect(() => {
+    if (isTextLike && url) {
+      setLoading(true);
+      setError(null);
+      fetch(url)
+        .then((res) => {
+          if (!res.ok) throw new Error('Failed to load file preview content.');
+          return res.text();
+        })
+        .then((data) => setTextData(data))
+        .catch((err) => setError(err.message))
+        .finally(() => setLoading(false));
+    }
+  }, [url, isTextLike]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  if (!file) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+      <div className="flex h-[85vh] w-full max-w-4xl flex-col rounded-2xl card-bg border-0 overflow-hidden theme-text-primary">
+        {/* Header */}
+        <div className="flex items-center justify-between border-0 px-5 py-3.5 bg-[var(--bg-card)]">
+          <div className="flex items-center gap-2.5 truncate pr-4">
+            <File className="h-4 w-4 theme-text-secondary shrink-0" />
+            <span className="font-semibold text-sm theme-text-primary truncate">{filename}</span>
+            <span className="rounded bg-[var(--bg-input)] px-2 py-0.5 text-[10px] font-mono uppercase theme-text-muted">
+              {ext}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {url && (
+              <a
+                href={url}
+                download={filename}
+                className="flex items-center gap-1.5 rounded-lg bg-[var(--bg-input)] px-3 py-1.5 text-xs font-medium theme-text-primary hover:bg-[var(--bg-hover)] transition-colors no-underline"
+                title="Download file"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>Download</span>
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-1.5 theme-text-muted hover:theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
+              title="Close Preview (Esc)"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Viewer */}
+        <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-[var(--bg-sidebar)]">
+          {isImage && url && (
+            <img src={url} alt={filename} className="max-h-full max-w-full object-contain rounded-lg border-0" />
+          )}
+
+          {isPdf && url && (
+            <iframe src={url} title={filename} className="h-full w-full rounded-lg border-0 bg-white" />
+          )}
+
+          {isVideo && url && (
+            <video controls src={url} className="max-h-full max-w-full rounded-lg border-0" />
+          )}
+
+          {isAudio && url && (
+            <div className="w-full max-w-md p-6 rounded-xl card-bg text-center space-y-4 border-0">
+              <audio controls src={url} className="w-full" />
+            </div>
+          )}
+
+          {isTextLike && (
+            <div className="h-full w-full overflow-auto rounded-xl bg-[var(--bg-card)] p-4 font-mono text-xs text-[var(--text-primary)] leading-relaxed border-0">
+              {loading ? (
+                <div className="flex h-full items-center justify-center theme-text-muted gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Loading preview...</span>
+                </div>
+              ) : error ? (
+                <div className="flex h-full items-center justify-center text-red-400">
+                  {error}
+                </div>
+              ) : (
+                <pre className="whitespace-pre-wrap font-mono m-0">{textData}</pre>
+              )}
+            </div>
+          )}
+
+          {!isImage && !isPdf && !isVideo && !isAudio && !isTextLike && (
+            <div className="text-center p-8 space-y-3">
+              <File className="h-12 w-12 mx-auto theme-text-muted opacity-50" />
+              <p className="text-xs theme-text-muted">No visual preview engine for .{ext} files.</p>
+              {url && (
+                <a
+                  href={url}
+                  download={filename}
+                  className="inline-flex items-center gap-2 rounded-xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] px-4 py-2 text-xs font-semibold hover:opacity-90 transition-all no-underline"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>Download File</span>
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const markdownComponents = {
-  h1: ({ children }) => <h1 className="text-xl font-bold theme-text-primary mt-4 mb-2 border-b border-[var(--border-muted)] pb-1">{children}</h1>,
+  h1: ({ children }) => <h1 className="text-xl font-bold theme-text-primary mt-4 mb-2 border-0 pb-1">{children}</h1>,
   h2: ({ children }) => <h2 className="text-lg font-bold theme-text-primary mt-3 mb-2">{children}</h2>,
   h3: ({ children }) => <h3 className="text-base font-semibold theme-text-primary mt-2 mb-1">{children}</h3>,
   p: ({ children }) => <p className="mb-2 leading-relaxed theme-text-primary font-sans text-base">{children}</p>,
   ul: ({ children }) => <ul className="list-disc pl-5 mb-3 space-y-1 text-base theme-text-primary">{children}</ul>,
   ol: ({ children }) => <ol className="list-decimal pl-5 mb-3 space-y-1 text-base theme-text-primary">{children}</ol>,
   li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-  blockquote: ({ children }) => <blockquote className="border-l-4 border-[var(--palette-steel-blue)] pl-3 my-2 theme-text-muted italic text-base">{children}</blockquote>,
+  blockquote: ({ children }) => <blockquote className="border-0 pl-3 my-2 theme-text-muted italic text-base">{children}</blockquote>,
   code: CodeBlock,
-  table: ({ children }) => <div className="my-3 overflow-x-auto rounded-xl border-0 shadow-sm"><table className="w-full border-collapse text-sm text-left">{children}</table></div>,
-  th: ({ children }) => <th className="border-b border-[var(--border-main)] bg-[var(--bg-input)] px-3.5 py-2.5 font-semibold theme-text-primary">{children}</th>,
-  td: ({ children }) => <td className="border-b border-[var(--border-muted)] px-3.5 py-2.5 theme-text-primary bg-[var(--bg-card)]/40">{children}</td>,
+  table: ({ children }) => <div className="my-3 overflow-x-auto rounded-xl border-0"><table className="w-full border-collapse text-sm text-left">{children}</table></div>,
+  th: ({ children }) => <th className="border-0 bg-[var(--bg-input)] px-3.5 py-2.5 font-semibold theme-text-primary">{children}</th>,
+  td: ({ children }) => <td className="border-0 px-3.5 py-2.5 theme-text-primary bg-[var(--bg-card)]/40">{children}</td>,
   a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-[var(--palette-warm-sand)] underline hover:opacity-80 font-medium">{children}</a>,
-  hr: () => <hr className="my-4 border-[var(--border-muted)]" />
+  hr: () => <hr className="my-4 border-0" />
 };
 
 export default function ChatWindow({
@@ -120,6 +278,7 @@ export default function ChatWindow({
   const modelMenuRef = useRef(null);
   const [inputText, setInputText] = useState('');
   const [attachedFiles, setAttachedFiles] = useState([]);
+  const [previewFile, setPreviewFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -303,7 +462,7 @@ export default function ChatWindow({
   return (
     <div className="flex h-full flex-1 flex-col app-bg theme-text-primary">
       {/* Top Header Bar */}
-      <header className="flex h-14 items-center justify-between border-b header-bg px-4 shadow-sm z-10">
+      <header className="flex h-14 items-center justify-between border-0 header-bg px-4 z-10">
         <div className="flex items-center gap-3">
           {!isSidebarOpen && (
             <button
@@ -327,10 +486,10 @@ export default function ChatWindow({
           <button
             type="button"
             onClick={() => setShowAirGapModal(true)}
-            className="flex items-center gap-1.5 rounded-full border-0 bg-[var(--bg-card)] px-3 py-1 text-xs theme-text-secondary hover:bg-[var(--bg-hover)] hover:theme-text-primary transition-colors cursor-pointer"
+            className="flex items-center gap-2 rounded-full border-0 bg-[var(--bg-card)] px-3 py-1 text-xs theme-text-secondary hover:bg-[var(--bg-hover)] hover:theme-text-primary transition-colors cursor-pointer"
             title="Click to view Sovereign Air-Gap Network Audit Telemetry"
           >
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--text-primary)]" />
             <span className="font-mono text-[11px] font-medium">Air-Gapped · 0 B Egress</span>
           </button>
         </div>
@@ -338,7 +497,7 @@ export default function ChatWindow({
 
       {!activeThreadId ? (
         <div className="flex h-full flex-1 flex-col items-center justify-center p-6 text-center theme-text-primary">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] shadow-md border-0">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] border-0">
             <Sparkles className="h-7 w-7" />
           </div>
           <h2 className="text-2xl font-bold tracking-tight theme-text-primary">
@@ -355,7 +514,7 @@ export default function ChatWindow({
         <div className="mx-auto max-w-3xl space-y-6">
           {messages.length === 0 && !isStreaming && (
             <div className="py-10 text-center">
-              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] shadow-md border-0">
+              <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] border-0">
                 <Sparkles className="h-6 w-6" />
               </div>
               <h2 className="text-xl font-bold tracking-tight theme-text-primary">
@@ -369,7 +528,7 @@ export default function ChatWindow({
                 <button
                   type="button"
                   onClick={() => onSendMessage("Extract all findings from ignore-files/ocr-test/test-1.pdf, query our RAG knowledge base for approval thresholds, and generate a formal Word document approval note deliverable.", [], [])}
-                  className="rounded-xl border-0 card-bg p-4 hover:bg-[var(--bg-hover)] transition-all group shadow-sm text-left cursor-pointer"
+                  className="rounded-xl border-0 card-bg p-4 hover:bg-[var(--bg-hover)] transition-all group text-left cursor-pointer"
                 >
                   <div className="flex items-center gap-1.5 text-xs font-semibold theme-text-primary group-hover:theme-text-accent">
                     <FileText className="h-4 w-4 text-emerald-400" />
@@ -383,7 +542,7 @@ export default function ChatWindow({
                 <button
                   type="button"
                   onClick={() => onSendMessage("Analyze sensor_logs.csv for thermal anomalies exceeding 150°C using Python code_sandbox, and generate a formatted Excel deliverable with anomaly statistics.", [], [])}
-                  className="rounded-xl border-0 card-bg p-4 hover:bg-[var(--bg-hover)] transition-all group shadow-sm text-left cursor-pointer"
+                  className="rounded-xl border-0 card-bg p-4 hover:bg-[var(--bg-hover)] transition-all group text-left cursor-pointer"
                 >
                   <div className="flex items-center gap-1.5 text-xs font-semibold theme-text-primary group-hover:theme-text-accent">
                     <Database className="h-4 w-4 text-blue-400" />
@@ -397,7 +556,7 @@ export default function ChatWindow({
                 <button
                   type="button"
                   onClick={() => onSendMessage("Generate a 3-slide executive PowerPoint presentation deliverable (.pptx) summarizing the inspection findings and action items for the CDU-2 refinery unit.", [], [])}
-                  className="rounded-xl border-0 card-bg p-4 hover:bg-[var(--bg-hover)] transition-all group shadow-sm text-left cursor-pointer"
+                  className="rounded-xl border-0 card-bg p-4 hover:bg-[var(--bg-hover)] transition-all group text-left cursor-pointer"
                 >
                   <div className="flex items-center gap-1.5 text-xs font-semibold theme-text-primary group-hover:theme-text-accent">
                     <BookOpen className="h-4 w-4 text-amber-400" />
@@ -430,28 +589,32 @@ export default function ChatWindow({
                           return (
                             <div key={fIdx} className="flex flex-col items-end gap-1 max-w-[240px]">
                               {isImg && fileUrl && (
-                                <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-xl border border-[var(--border-color)] shadow-xs hover:opacity-90 transition-opacity">
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewFile({ filename: fname, url: fileUrl })}
+                                  className="block overflow-hidden rounded-xl border-0 hover:opacity-90 transition-opacity bg-transparent cursor-pointer p-0 text-left"
+                                  title={`Preview ${fname}`}
+                                >
                                   <img
                                     src={fileUrl}
                                     alt={fname}
                                     className="max-h-[140px] w-auto max-w-full object-cover rounded-xl"
                                     onError={(e) => { e.currentTarget.style.display = 'none'; }}
                                   />
-                                </a>
+                                </button>
                               )}
                               {fileUrl ? (
-                                <a
-                                  href={fileUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex items-center gap-1.5 rounded-lg border-0 card-bg px-2.5 py-1 text-xs theme-text-primary shadow-xs hover:bg-[var(--bg-hover)] transition-colors no-underline"
-                                  title={`View/Download ${fname}`}
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewFile({ filename: fname, url: fileUrl })}
+                                  className="flex items-center gap-1.5 rounded-lg border-0 card-bg px-2.5 py-1 text-xs theme-text-primary hover:bg-[var(--bg-hover)] transition-colors cursor-pointer text-left"
+                                  title={`Preview ${fname}`}
                                 >
-                                  <File className="h-3.5 w-3.5 theme-text-secondary shrink-0" />
+                                  <Eye className="h-3.5 w-3.5 text-blue-400 shrink-0" />
                                   <span className="truncate max-w-[180px]">{fname}</span>
-                                </a>
+                                </button>
                               ) : (
-                                <div className="flex items-center gap-1.5 rounded-lg border-0 card-bg px-2.5 py-1 text-xs theme-text-primary shadow-xs">
+                                <div className="flex items-center gap-1.5 rounded-lg border-0 card-bg px-2.5 py-1 text-xs theme-text-primary">
                                   <File className="h-3.5 w-3.5 theme-text-muted shrink-0" />
                                   <span className="truncate max-w-[180px]">{fname}</span>
                                 </div>
@@ -461,12 +624,12 @@ export default function ChatWindow({
                         })}
                       </div>
                     )}
-                    <div className="rounded-2xl bg-[var(--bg-user-chip)] border-0 px-4 py-3 text-sm theme-text-primary leading-relaxed shadow-sm font-sans">
+                    <div className="rounded-2xl bg-[var(--bg-user-chip)] border-0 px-4 py-3 text-sm theme-text-primary leading-relaxed font-sans">
                       {msg.content}
                     </div>
                   </div>
                 ) : (
-                  /* Assistant Message: Agentic Workflow Stepper, Ambient Status Strip & Deliverable Output */
+                  /* Assistant Message: Agentic Workflow Stepper, Ephemeral Ambient Status Strip & Deliverable Output */
                   <div className="mr-auto w-full space-y-2 pt-1">
                     {/* Ephemeral Ambient Status Strip */}
                     <StatusStrip
@@ -494,6 +657,9 @@ export default function ChatWindow({
                         <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                           {msg.content}
                         </ReactMarkdown>
+                        {(!isStreaming || !isLastAssistant) && (
+                          <CopyResponseButton text={msg.content} />
+                        )}
                       </div>
                     )}
                   </div>
@@ -530,7 +696,7 @@ export default function ChatWindow({
 
       {/* Connection Error Banner */}
       {connectionError && (
-        <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2 rounded-lg border-0 bg-[var(--bg-card)] p-2.5 px-4 text-xs theme-text-muted shadow-md">
+        <div className="mx-auto mb-2 flex max-w-3xl items-center gap-2 rounded-lg border-0 bg-[var(--bg-card)] p-2.5 px-4 text-xs theme-text-muted">
           <span>{connectionError}</span>
         </div>
       )}
@@ -540,24 +706,34 @@ export default function ChatWindow({
         <div className="mx-auto max-w-3xl">
           <form
             onSubmit={handleSubmit}
-            className="relative rounded-2xl border border-[var(--border-muted)] card-bg p-2.5 shadow-sm transition-all focus-within:border-[var(--border-color)] space-y-1.5 z-20"
+            className="relative rounded-2xl border-0 card-bg p-2.5 transition-all space-y-1.5 z-20"
           >
             {/* Attached Files Chips inside the Card Container */}
             {attachedFiles.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 pb-1 border-b border-[var(--border-muted)]/40">
-                {attachedFiles.map((file) => (
-                  <div key={file.file_id} className="flex items-center gap-1.5 rounded-lg border-0 input-bg px-2 py-0.5 text-[11px] theme-text-primary shadow-xs">
-                    <File className="h-3 w-3 theme-text-muted shrink-0" />
-                    <span className="truncate max-w-[160px]">{file.filename}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeAttachedFile(file.file_id)}
-                      className="ml-0.5 rounded p-0.5 theme-text-muted hover:bg-[var(--bg-hover)] hover:theme-text-primary transition-colors border-0 bg-transparent cursor-pointer"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
+              <div className="flex flex-wrap gap-1.5 pb-2 border-0">
+                {attachedFiles.map((file) => {
+                  const ext = (file.filename?.split('.').pop() || 'FILE').toUpperCase();
+                  const isImage = ['PNG', 'JPG', 'JPEG', 'WEBP', 'GIF', 'SVG'].includes(ext);
+
+                  return (
+                    <div key={file.file_id} className="flex items-center gap-2 rounded-xl border-0 bg-[var(--bg-input)] px-2.5 py-1 text-xs theme-text-primary">
+                      <span className={`rounded px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider ${
+                        isImage ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
+                      }`}>
+                        {ext}
+                      </span>
+                      <span className="truncate max-w-[180px] font-medium text-[11px]">{file.filename}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeAttachedFile(file.file_id)}
+                        className="ml-0.5 rounded p-0.5 theme-text-muted hover:bg-[var(--bg-hover)] hover:theme-text-primary transition-colors border-0 bg-transparent cursor-pointer"
+                        title="Remove attachment"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -582,7 +758,7 @@ export default function ChatWindow({
             />
 
             {/* Compact Bottom Toolbar Row */}
-            <div className="flex items-center justify-between pt-1 border-t border-[var(--border-muted)]/40">
+            <div className="flex items-center justify-between pt-1 border-0">
               {/* Left Action Controls */}
               <div className="flex items-center gap-1.5">
                 <input
@@ -612,7 +788,7 @@ export default function ChatWindow({
                       selectedModelMode === 'coding'
                         ? 'input-bg theme-text-muted opacity-40 cursor-not-allowed'
                         : isThinkingMode
-                        ? 'bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] font-semibold shadow-xs'
+                        ? 'bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] font-semibold'
                         : 'input-bg theme-text-muted hover:theme-text-primary'
                     }`}
                     title={selectedModelMode === 'coding' ? "Thinking is disabled for Coding Model" : (isThinkingMode ? "Disable Thinking Mode" : "Enable Thinking Mode")}
@@ -637,7 +813,7 @@ export default function ChatWindow({
                   </button>
 
                   {showModelMenu && (
-                    <div className="absolute bottom-full mb-2 left-0 z-50 w-56 rounded-xl card-bg border border-[var(--border-muted)] shadow-2xl p-1 font-sans text-xs space-y-0.5">
+                    <div className="absolute bottom-full mb-2 left-0 z-50 w-56 rounded-xl card-bg border-0 p-1 font-sans text-xs space-y-0.5">
                       {(modelConfig?.options || [
                         { id: 'auto', label: 'Auto (Router)', desc: 'Dynamic Waterfall Routing' },
                         { id: 'reasoning', label: 'Reasoning', desc: 'Step-by-step reasoning & math' },
@@ -679,7 +855,7 @@ export default function ChatWindow({
                 disabled={!canSubmit}
                 className={`flex h-7 w-7 items-center justify-center rounded-full transition-all border-0 cursor-pointer ${
                   canSubmit
-                    ? 'bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] hover:opacity-90 shadow-xs'
+                    ? 'bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] hover:opacity-90'
                     : 'input-bg theme-text-muted cursor-not-allowed opacity-40'
                 }`}
                 title="Send Message"
@@ -700,10 +876,10 @@ export default function ChatWindow({
       {/* Sovereign Air-Gap Network Security Telemetry Audit Modal */}
       {showAirGapModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-lg rounded-2xl card-bg p-6 shadow-2xl border-0 theme-text-primary space-y-4">
-            <div className="flex items-center justify-between border-b border-[var(--border-muted)] pb-3">
+          <div className="w-full max-w-lg rounded-2xl card-bg p-6 border-0 theme-text-primary space-y-4">
+            <div className="flex items-center justify-between border-0 pb-3">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-emerald-400" />
+                <ShieldCheck className="h-5 w-5 theme-text-secondary" />
                 <h3 className="text-base font-bold theme-text-primary">
                   Sovereign Air-Gap Security Telemetry
                 </h3>
@@ -720,8 +896,8 @@ export default function ChatWindow({
             <div className="space-y-2.5 font-mono text-xs">
               <div className="flex justify-between items-center rounded-xl bg-[var(--bg-input)] p-3">
                 <span className="theme-text-muted">Air-Gap Status:</span>
-                <span className="text-emerald-400 font-bold flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="theme-text-primary font-bold flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-[var(--text-primary)] animate-pulse" />
                   {netTelemetry?.status || '100% AIR_GAPPED_ISOLATED'}
                 </span>
               </div>
@@ -760,8 +936,8 @@ export default function ChatWindow({
       {/* Sovereign Knowledge Base (RAG) Management Modal */}
       {showKbModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-2xl rounded-2xl card-bg p-6 shadow-2xl border-0 theme-text-primary space-y-4 max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between border-b border-[var(--border-muted)] pb-3">
+          <div className="w-full max-w-2xl rounded-2xl card-bg p-6 border-0 theme-text-primary space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between border-0 pb-3">
               <div className="flex items-center gap-2">
                 <BookOpen className="h-5 w-5 text-[var(--text-secondary)]" />
                 <h3 className="text-base font-bold theme-text-primary">
@@ -782,7 +958,7 @@ export default function ChatWindow({
             </p>
 
             {/* Drag & Drop Upload Container */}
-            <div className="rounded-xl border-2 border-dashed border-[var(--border-main)] p-4 text-center bg-[var(--bg-input)]">
+            <div className="rounded-xl border-0 p-4 text-center bg-[var(--bg-input)]">
               <input
                 type="file"
                 ref={kbFileInputRef}
@@ -823,7 +999,7 @@ export default function ChatWindow({
                 </div>
               ) : (
                 kbData.files.map((file) => (
-                  <div key={file.source} className="flex items-center justify-between rounded-xl bg-[var(--bg-input)] p-3 text-xs shadow-sm">
+                  <div key={file.source} className="flex items-center justify-between rounded-xl bg-[var(--bg-input)] p-3 text-xs border-0">
                     <div className="flex items-center gap-2.5 truncate">
                       <FileText className="h-4 w-4 theme-text-secondary shrink-0" />
                       <div className="truncate">
@@ -846,7 +1022,7 @@ export default function ChatWindow({
               )}
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-[var(--border-muted)]">
+            <div className="flex justify-end pt-2 border-0">
               <button
                 type="button"
                 onClick={onCloseKbModal}
@@ -857,6 +1033,14 @@ export default function ChatWindow({
             </div>
           </div>
         </div>
+      )}
+
+      {/* In-App File Preview Modal */}
+      {previewFile && (
+        <FilePreviewModal
+          file={previewFile}
+          onClose={() => setPreviewFile(null)}
+        />
       )}
     </div>
   );
