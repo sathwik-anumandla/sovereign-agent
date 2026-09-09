@@ -124,7 +124,7 @@ export default function Sidebar({
   return (
     <aside className="flex h-full w-64 flex-col border-r sidebar-bg p-3 theme-text-primary transition-all duration-200 relative">
       {/* Sidebar Header */}
-      <div className="flex items-center justify-between pb-2">
+      <div className="flex items-center justify-between pb-3">
         <span className="text-sm font-semibold tracking-tight theme-text-primary flex items-center gap-1.5">
           Sovereign Agent
         </span>
@@ -136,78 +136,6 @@ export default function Sidebar({
         >
           <PanelLeftClose className="h-4 w-4" />
         </button>
-      </div>
-
-      {/* Logged-In User Profile Card with Dropdown Menu */}
-      <div className="relative mb-3" ref={profileRef}>
-        <button
-          type="button"
-          onClick={() => setShowProfileMenu((prev) => !prev)}
-          className="w-full rounded-xl bg-[var(--bg-input)] px-3 py-2.5 flex items-center justify-between hover:bg-[var(--bg-hover)] transition-colors border-0 cursor-pointer text-left"
-        >
-          <div className="flex items-center gap-2.5 truncate">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-card)] theme-text-secondary border-0">
-              <User className="h-4 w-4" />
-            </div>
-            <div className="truncate">
-              <div className="font-semibold text-xs theme-text-primary truncate">
-                {currentUser?.name || 'Authenticated User'}
-              </div>
-              <div className="text-[10px] theme-text-muted font-mono flex items-center gap-1.5 mt-0.5">
-                <span>{currentUser?.department || 'Operations'}</span>
-                <span className="rounded px-1.5 py-0.2 text-[9px] uppercase font-bold bg-[var(--bg-card)] theme-text-muted border-0">
-                  {currentUser?.role || 'USER'}
-                </span>
-              </div>
-            </div>
-          </div>
-          <ChevronDown className={`h-3.5 w-3.5 theme-text-muted transition-transform duration-200 ${showProfileMenu ? 'rotate-180' : ''}`} />
-        </button>
-
-        {/* Profile Popover Menu */}
-        {showProfileMenu && (
-          <div className="absolute left-0 right-0 top-full mt-1.5 z-50 rounded-xl card-bg p-1 border-0 space-y-0.5 animate-in fade-in zoom-in-95 duration-100">
-            <button
-              type="button"
-              onClick={() => {
-                setShowProfileMenu(false);
-                setShowPasswordModal(true);
-              }}
-              className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
-            >
-              <Key className="h-3.5 w-3.5 theme-text-secondary" />
-              <span>Change Password</span>
-            </button>
-
-            {onOpen2faModal && (
-              <button
-                type="button"
-                onClick={() => {
-                  setShowProfileMenu(false);
-                  onOpen2faModal();
-                }}
-                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
-              >
-                <ShieldCheck className="h-3.5 w-3.5 theme-text-secondary" />
-                <span>2FA Security</span>
-              </button>
-            )}
-
-            {onLogout && (
-              <button
-                type="button"
-                onClick={() => {
-                  setShowProfileMenu(false);
-                  onLogout();
-                }}
-                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-xs theme-text-primary hover:bg-[var(--bg-hover)] transition-colors cursor-pointer border-0 pt-2"
-              >
-                <LogOut className="h-3.5 w-3.5 theme-text-secondary" />
-                <span>Logout</span>
-              </button>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Action Buttons: New Chat, Knowledge Base, Admin Panel */}

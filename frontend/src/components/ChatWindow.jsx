@@ -21,7 +21,13 @@ import {
   Moon,
   ChevronDown,
   Download,
-  Eye
+  Eye,
+  Share2,
+  SquarePen,
+  User,
+  Key,
+  LogOut,
+  Sliders
 } from 'lucide-react';
 import ToolCard from './ToolCard';
 import AgenticWorkflowStepper from './AgenticWorkflowStepper';
@@ -260,22 +266,37 @@ export default function ChatWindow({
   routeDecision,
   onSendMessage,
   onFileUpload,
+  onNewThread,
   isSidebarOpen,
   onToggleSidebar,
   isThinkingMode = false,
   onToggleThinking,
-  theme = 'dark',
+  theme = 'light',
   onToggleTheme,
   showKbModal = false,
   onCloseKbModal,
   token,
-  modelConfig
+  modelConfig,
+  currentUser,
+  onLogout,
+  onOpenAdminModal,
+  onOpen2faModal
 }) {
   const [showAirGapModal, setShowAirGapModal] = useState(false);
   const [netTelemetry, setNetTelemetry] = useState(null);
   const [selectedModelMode, setSelectedModelMode] = useState('auto');
   const [showModelMenu, setShowModelMenu] = useState(false);
   const modelMenuRef = useRef(null);
+
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const profileMenuRef = useRef(null);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pwdStatus, setPwdStatus] = useState(null);
+  const [isChangingPwd, setIsChangingPwd] = useState(false);
+
   const [inputText, setInputText] = useState('');
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [previewFile, setPreviewFile] = useState(null);
@@ -288,10 +309,63 @@ export default function ChatWindow({
       if (modelMenuRef.current && !modelMenuRef.current.contains(event.target)) {
         setShowModelMenu(false);
       }
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+        setShowProfileMenu(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const handleChangePasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (!oldPassword || !newPassword || isChangingPwd) return;
+
+    if (newPassword !== confirmPassword) {
+      setPwdStatus({ type: 'error', message: 'New passwords do not match.' });
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setPwdStatus({ type: 'error', message: 'Password must be at least 6 characters long.' });
+      return;
+    }
+
+    setIsChangingPwd(true);
+    setPwdStatus(null);
+
+    try {
+      const res = await fetch('http://localhost:8000/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          old_password: oldPassword,
+          new_password: newPassword
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to change password');
+      }
+
+      setPwdStatus({ type: 'success', message: 'Password updated successfully!' });
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setPwdStatus(null);
+      }, 1500);
+    } catch (err) {
+      setPwdStatus({ type: 'error', message: err.message });
+    } finally {
+      setIsChangingPwd(false);
+    }
+  };
 
   const fetchNetTelemetry = async () => {
     try {
@@ -462,8 +536,8 @@ export default function ChatWindow({
   return (
     <div className="flex h-full flex-1 flex-col app-bg theme-text-primary">
       {/* Top Header Bar */}
-      <header className="flex h-14 items-center justify-between border-0 header-bg px-4 z-10">
-        <div className="flex items-center gap-3">
+      <header className="flex h-14 items-center justify-between border-0 header-bg px-4 z-20 relative">
+        <div className="flex items-center gap-2">
           {!isSidebarOpen && (
             <button
               onClick={onToggleSidebar}
@@ -474,24 +548,118 @@ export default function ChatWindow({
             </button>
           )}
 
-          <div className="flex items-center gap-2 truncate">
+          {onNewThread && (
+            <button
+              type="button"
+              onClick={onNewThread}
+              className="flex h-8 w-8 items-center justify-center rounded-lg theme-text-muted hover:bg-[var(--bg-hover)] hover:theme-text-primary transition-colors border-0 bg-transparent cursor-pointer"
+              title="New Chat"
+            >
+              <SquarePen className="h-4 w-4" />
+            </button>
+          )}
+
+          <div className="flex items-center gap-2 truncate ml-1">
             <span className="text-sm font-semibold theme-text-primary truncate max-w-xs sm:max-w-md">
               {activeThreadTitle || 'Sovereign Agent'}
             </span>
           </div>
         </div>
 
-        {/* Right Air-Gap Telemetry Badge */}
-        <div className="flex items-center gap-2">
+        {/* Right Header Actions: Air-Gap Badge and Top-Right User Profile Avatar */}
+        <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => setShowAirGapModal(true)}
-            className="flex items-center gap-2 rounded-full border-0 bg-[var(--bg-card)] px-3 py-1 text-xs theme-text-secondary hover:bg-[var(--bg-hover)] hover:theme-text-primary transition-colors cursor-pointer"
+            className="hidden sm:flex items-center gap-2 rounded-full border-0 bg-[var(--bg-card)] px-3 py-1 text-xs theme-text-secondary hover:bg-[var(--bg-hover)] hover:theme-text-primary transition-colors cursor-pointer"
             title="Click to view Sovereign Air-Gap Network Audit Telemetry"
           >
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--text-primary)]" />
-            <span className="font-mono text-[11px] font-medium">Air-Gapped · 0 B Egress</span>
+            <span className="font-mono text-[11px] font-medium">Air-Gapped</span>
           </button>
+
+          {/* User Profile Avatar in Top-Right Corner */}
+          <div className="relative" ref={profileMenuRef}>
+            <button
+              type="button"
+              onClick={() => setShowProfileMenu((prev) => !prev)}
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] font-bold text-xs shadow-xs hover:opacity-90 transition-all border-0 cursor-pointer"
+              title={currentUser?.name || 'User Profile'}
+            >
+              {(currentUser?.name || currentUser?.username || 'A')[0].toUpperCase()}
+            </button>
+
+            {/* Top-Right Profile Dropdown Popover Menu */}
+            {showProfileMenu && (
+              <div className="absolute right-0 top-full mt-2 w-56 z-50 rounded-2xl card-bg p-2 shadow-lg border-0 space-y-1 animate-in fade-in zoom-in-95 duration-100 theme-text-primary">
+                <div className="px-3 py-2 border-b border-[var(--bg-hover)]/30">
+                  <div className="font-bold text-xs theme-text-primary truncate">
+                    {currentUser?.name || 'Authenticated User'}
+                  </div>
+                  <div className="text-[10px] theme-text-muted font-mono truncate mt-0.5">
+                    @{currentUser?.username || 'user'} · {currentUser?.department || 'Operations'}
+                  </div>
+                  <div className="mt-1.5 inline-block rounded-md bg-[var(--bg-input)] px-2 py-0.5 text-[9px] font-bold uppercase font-mono theme-text-muted">
+                    {currentUser?.role || 'USER'}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    setShowPasswordModal(true);
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
+                >
+                  <Key className="h-3.5 w-3.5 theme-text-secondary" />
+                  <span>Change Password</span>
+                </button>
+
+                {onOpen2faModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      onOpen2faModal();
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5 theme-text-secondary" />
+                    <span>2FA Security</span>
+                  </button>
+                )}
+
+                {currentUser?.role === 'admin' && onOpenAdminModal && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      onOpenAdminModal();
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
+                  >
+                    <Sliders className="h-3.5 w-3.5 theme-text-secondary" />
+                    <span>Admin Dashboard</span>
+                  </button>
+                )}
+
+                {onLogout && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      onLogout();
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs text-red-500 hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer pt-1.5"
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                    <span>Logout</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -624,7 +792,7 @@ export default function ChatWindow({
                         })}
                       </div>
                     )}
-                    <div className="rounded-2xl bg-[var(--bg-user-chip)] border-0 px-4 py-3 text-sm theme-text-primary leading-relaxed font-sans">
+                    <div className="rounded-2xl bg-[var(--bg-user-chip)] border-0 px-4 py-3 text-sm text-[var(--text-user-chip)] leading-relaxed font-sans">
                       {msg.content}
                     </div>
                   </div>
@@ -1041,6 +1209,93 @@ export default function ChatWindow({
           file={previewFile}
           onClose={() => setPreviewFile(null)}
         />
+      )}
+
+      {/* Change Password Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md rounded-2xl card-bg p-6 border-0 theme-text-primary space-y-4 shadow-lg">
+            <div className="flex items-center justify-between pb-2">
+              <h3 className="text-base font-bold theme-text-primary flex items-center gap-2">
+                <Key className="h-4 w-4 theme-text-secondary" />
+                <span>Change Password</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPasswordModal(false);
+                  setPwdStatus(null);
+                }}
+                className="rounded-lg p-1.5 theme-text-muted hover:bg-[var(--bg-hover)] border-0 bg-transparent cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {pwdStatus && (
+              <div className={`rounded-xl p-3 text-xs font-medium ${
+                pwdStatus.type === 'success' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+              }`}>
+                {pwdStatus.message}
+              </div>
+            )}
+
+            <form onSubmit={handleChangePasswordSubmit} className="space-y-3">
+              <div>
+                <label className="text-xs font-medium theme-text-muted block mb-1">Current Password</label>
+                <input
+                  type="password"
+                  value={oldPassword}
+                  onChange={(e) => setOldPassword(e.target.value)}
+                  className="w-full rounded-xl border-0 input-bg px-3.5 py-2 text-xs theme-text-primary focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium theme-text-muted block mb-1">New Password</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full rounded-xl border-0 input-bg px-3.5 py-2 text-xs theme-text-primary focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium theme-text-muted block mb-1">Confirm New Password</label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full rounded-xl border-0 input-bg px-3.5 py-2 text-xs theme-text-primary focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPasswordModal(false);
+                    setPwdStatus(null);
+                  }}
+                  className="rounded-xl px-4 py-2 text-xs font-semibold theme-text-muted hover:bg-[var(--bg-hover)] border-0 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isChangingPwd}
+                  className="rounded-xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] px-4 py-2 text-xs font-semibold hover:opacity-90 border-0 cursor-pointer disabled:opacity-50"
+                >
+                  {isChangingPwd ? 'Updating...' : 'Update Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

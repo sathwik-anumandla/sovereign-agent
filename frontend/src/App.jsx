@@ -22,7 +22,7 @@ export default function App() {
   const [routeDecision, setRouteDecision] = useState(null);
   const [modelConfig, setModelConfig] = useState(null);
   const [isThinkingMode, setIsThinkingMode] = useState(false);
-  const [theme, setTheme] = useState(() => localStorage.getItem('workbench_theme') || 'dark');
+  const [theme, setTheme] = useState(() => localStorage.getItem('workbench_theme') || 'light');
   const [showKbModal, setShowKbModal] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [show2faModal, setShow2faModal] = useState(false);
@@ -613,6 +613,7 @@ export default function App() {
         routeDecision={routeDecision}
         onSendMessage={handleSendMessage}
         onFileUpload={handleFileUpload}
+        onNewThread={handleNewThread}
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
         isThinkingMode={isThinkingMode}
@@ -623,6 +624,10 @@ export default function App() {
         onCloseKbModal={() => setShowKbModal(false)}
         token={token}
         modelConfig={modelConfig}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        onOpenAdminModal={() => setShowAdminModal(true)}
+        onOpen2faModal={() => setShow2faModal(true)}
       />
       <AdminPanelModal
         isOpen={showAdminModal}
