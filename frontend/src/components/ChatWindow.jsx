@@ -60,14 +60,59 @@ function CopyResponseButton({ text }) {
   );
 }
 
-function extractGeneratedFiles(msg) {
+function extractGeneratedFiles(msg, messages = []) {
   if (!msg) return [];
+
+  // 1. Collect all uploaded file names from all messages in the conversation
+  const uploadedFileNames = new Set();
+  messages.forEach((m) => {
+    if (m.attachedFiles && Array.isArray(m.attachedFiles)) {
+      m.attachedFiles.forEach((f) => {
+        const fn = f.filename || f.original_filename || f.name;
+        if (fn) {
+          uploadedFileNames.add(fn.split(/[/\\]/).pop().toLowerCase());
+        }
+      });
+    }
+  });
+
+  // 2. Collect all input file paths passed to reading/analysis tools in this turn
+  const inputToolFiles = new Set();
+  const toolCalls = msg.toolCalls || [];
+  toolCalls.forEach((tc) => {
+    const toolName = (tc.name || tc.tool_name || tc.tool || '').toLowerCase();
+    const args = tc.args || tc.input || {};
+
+    if (toolName.includes('ocr') || toolName.includes('vlm')) {
+      if (args.image_path) inputToolFiles.add(args.image_path.split(/[/\\]/).pop().toLowerCase());
+      if (args.file_path) inputToolFiles.add(args.file_path.split(/[/\\]/).pop().toLowerCase());
+    }
+    if (toolName.includes('spreadsheet') || toolName.includes('csv')) {
+      if (args.file_path) inputToolFiles.add(args.file_path.split(/[/\\]/).pop().toLowerCase());
+      if (args.filepath) inputToolFiles.add(args.filepath.split(/[/\\]/).pop().toLowerCase());
+    }
+    if (toolName.includes('file_io')) {
+      if (args.action === 'read' || args.mode === 'read' || !args.action) {
+        if (args.filepath) inputToolFiles.add(args.filepath.split(/[/\\]/).pop().toLowerCase());
+        if (args.file_path) inputToolFiles.add(args.file_path.split(/[/\\]/).pop().toLowerCase());
+      }
+    }
+  });
+
   const filesMap = new Map();
 
   const addFile = (filename, rawPath) => {
     if (!filename) return;
     const cleanName = filename.split(/[/\\]/).pop().split('?')[0];
     if (!cleanName) return;
+
+    const lowerClean = cleanName.toLowerCase();
+
+    // STRICT FILTER: Do NOT include uploaded files or tool input files!
+    if (uploadedFileNames.has(lowerClean) || inputToolFiles.has(lowerClean)) {
+      return;
+    }
+
     const ext = (cleanName.split('.').pop() || '').toLowerCase();
     const validExts = ['docx', 'pptx', 'xlsx', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'csv', 'txt', 'html', 'json', 'md', 'py', 'zip'];
     if (validExts.includes(ext) && !filesMap.has(cleanName)) {
@@ -75,31 +120,42 @@ function extractGeneratedFiles(msg) {
     }
   };
 
-  // 1. Scan tool calls and results
-  const toolCalls = msg.toolCalls || [];
+  // 3. Scan tool calls for output generated files
   toolCalls.forEach((tc) => {
+    const toolName = (tc.name || tc.tool_name || tc.tool || '').toLowerCase();
     const args = tc.args || tc.input || {};
     const res = tc.result || tc.output || {};
-    
-    if (args.output_filename) addFile(args.output_filename, args.output_filename);
-    if (args.filename) addFile(args.filename, args.filename);
-    if (args.target_file) addFile(args.target_file, args.target_file);
-    if (args.file_path) addFile(args.file_path, args.file_path);
 
-    const strContent = JSON.stringify(args) + ' ' + (typeof res === 'string' ? res : JSON.stringify(res));
-    const matches = strContent.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/|(?:\b|\/))([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|txt|html|json|md|py|zip))/gi);
-    for (const match of matches) {
-      addFile(match[1], match[0]);
+    if (toolName.includes('doc_gen')) {
+      if (args.output_filename) addFile(args.output_filename, args.output_filename);
+      if (typeof res === 'object' && res !== null) {
+        if (res.output_filepath) addFile(res.output_filepath, res.output_filepath);
+        if (res.output_path) addFile(res.output_path, res.output_path);
+        if (res.filepath) addFile(res.filepath, res.filepath);
+      }
+    }
+
+    if (toolName.includes('file_io') && (args.action === 'write' || args.mode === 'write')) {
+      if (args.filepath) addFile(args.filepath, args.filepath);
+      if (args.file_path) addFile(args.file_path, args.file_path);
+    }
+
+    if (toolName.includes('code_sandbox') || toolName.includes('sandbox')) {
+      const resStr = typeof res === 'string' ? res : JSON.stringify(res);
+      const matches = resStr.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/|(?:\b|\/))([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|txt|html|json|md|py|zip))/gi);
+      for (const match of matches) {
+        addFile(match[1], match[0]);
+      }
     }
   });
 
-  // 2. Scan assistant message content text for markdown file links or filenames
+  // 4. Scan assistant message content text for markdown file links or explicitly mentioned generated files
   if (msg.content) {
     const linkMatches = msg.content.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g);
     for (const match of linkMatches) {
       addFile(match[2], match[2]);
     }
-    const textMatches = msg.content.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/|`|\b)([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|txt|html|json|md|py|zip))/gi);
+    const textMatches = msg.content.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/|`)([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|txt|html|json|md|py|zip))/gi);
     for (const match of textMatches) {
       addFile(match[1], match[0]);
     }
@@ -948,7 +1004,7 @@ export default function ChatWindow({
 
                     {/* Generated Deliverables Section */}
                     {(() => {
-                      const deliverables = extractGeneratedFiles(msg);
+                      const deliverables = extractGeneratedFiles(msg, messages);
                       if (deliverables.length === 0) return null;
                       return (
                         <div className="pt-2 space-y-2">
