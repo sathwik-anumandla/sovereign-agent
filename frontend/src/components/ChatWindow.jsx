@@ -102,8 +102,8 @@ function extractGeneratedFiles(msg, messages = []) {
   const inputToolFiles = new Set();
   const toolCalls = msg.toolCalls || [];
   toolCalls.forEach((tc) => {
-    const toolName = (tc.name || tc.tool_name || tc.tool || '').toLowerCase();
-    const args = tc.args || tc.input || {};
+    const toolName = (tc.name || tc.tool_name || tc.tool || (tc.function && tc.function.name) || '').toLowerCase();
+    const args = tc.args || tc.input || tc.tool_input || (tc.function && tc.function.arguments) || {};
 
     if (toolName.includes('ocr') || toolName.includes('vlm')) {
       if (args.image_path) inputToolFiles.add(args.image_path.split(/[/\\]/).pop().toLowerCase());
@@ -152,14 +152,15 @@ function extractGeneratedFiles(msg, messages = []) {
     }
   };
 
-  // 3. Scan tool calls for output generated files ONLY
+  // 3. Scan tool calls for output generated files (inspecting args, tool_input, output_summary, raw_output, result)
   toolCalls.forEach((tc) => {
-    const toolName = (tc.name || tc.tool_name || tc.tool || '').toLowerCase();
-    const args = tc.args || tc.input || {};
-    const res = tc.result || tc.output || {};
+    const toolName = (tc.name || tc.tool_name || tc.tool || (tc.function && tc.function.name) || '').toLowerCase();
+    const args = tc.args || tc.input || tc.tool_input || (tc.function && tc.function.arguments) || {};
+    const res = tc.result || tc.output || tc.output_summary || tc.raw_output || {};
 
     if (toolName.includes('doc_gen')) {
       if (args.output_filename) addFile(args.output_filename, args.output_filename);
+      if (args.filename) addFile(args.filename, args.filename);
       if (typeof res === 'object' && res !== null) {
         if (res.output_filepath) addFile(res.output_filepath, res.output_filepath);
         if (res.output_path) addFile(res.output_path, res.output_path);
@@ -172,20 +173,23 @@ function extractGeneratedFiles(msg, messages = []) {
       if (args.file_path) addFile(args.file_path, args.file_path);
     }
 
-    if (toolName.includes('code_sandbox') || toolName.includes('sandbox')) {
-      const resStr = typeof res === 'string' ? res : JSON.stringify(res);
-      const matches = resStr.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/)([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|zip))/gi);
-      for (const match of matches) {
-        addFile(match[1], match[0]);
-      }
+    // String scan across tool arguments and results
+    const strContent = JSON.stringify(args) + ' ' + (typeof res === 'string' ? res : JSON.stringify(res));
+    const matches = strContent.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/|(?:\b|\/))([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|zip))/gi);
+    for (const match of matches) {
+      addFile(match[1], match[0]);
     }
   });
 
-  // 4. Scan assistant message content ONLY for explicit markdown links in workspace/uploads directory
+  // 4. Scan assistant message content text for markdown file links or mentioned generated filenames
   if (msg.content) {
-    const linkMatches = msg.content.matchAll(/\[([^\]]+)\]\(((?:workspace\/|data\/uploads\/)[^)]+)\)/g);
+    const linkMatches = msg.content.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g);
     for (const match of linkMatches) {
       addFile(match[2], match[2]);
+    }
+    const textMatches = msg.content.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/|`|\b)([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|zip))/gi);
+    for (const match of textMatches) {
+      addFile(match[1], match[0]);
     }
   }
 
