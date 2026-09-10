@@ -751,52 +751,73 @@ def download_workspace_file(
     download: Optional[bool] = Query(False),
     current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
 ):
-    """Serves a deliverable or uploaded file from thread workspace or disk storage."""
+    """Serves a deliverable or uploaded file strictly from thread workspace or thread uploads directory."""
     try:
         clean_filename = Path(filename).name
+
+        # Security Guard 1: Block system/source code files, python scripts, credentials, and dotfiles
+        restricted_extensions = {".py", ".pyc", ".env", ".key", ".pem", ".git", ".db", ".sqlite", ".pkl", ".sh"}
+        file_ext = Path(clean_filename).suffix.lower()
+        if file_ext in restricted_extensions or clean_filename.startswith("."):
+            raise HTTPException(status_code=403, detail="Forbidden: System source files and credentials cannot be downloaded.")
+
         file_path = None
 
-        # 1. Try workspace path validation
+        # 1. Try workspace path validation (workspace/{thread_id}/...)
         try:
-            val_p = validate_workspace_path(filename, thread_id)
+            val_p = validate_workspace_path(filename, thread_id, create_parents=False)
             if val_p.exists() and val_p.is_file():
                 file_path = val_p
         except Exception:
             pass
 
-        # 2. Check thread workspace directory recursively
+        # 2. Check thread workspace directory recursively (workspace/{thread_id}/...)
         if not file_path:
             ws_dir = Path("workspace") / thread_id
             if ws_dir.exists():
                 found_ws = list(ws_dir.rglob(clean_filename))
-                if found_ws and found_ws[0].exists():
+                if found_ws and found_ws[0].exists() and found_ws[0].is_file():
                     file_path = found_ws[0]
 
-        # 3. Check data/uploads/{thread_id} directory
+        # 3. Check data/uploads/{thread_id} directory (data/uploads/{thread_id}/...)
         if not file_path:
             upload_dir = Path("data/uploads") / thread_id
             if upload_dir.exists():
                 found_up = list(upload_dir.glob(f"*_{clean_filename}")) or list(upload_dir.rglob(clean_filename))
-                if found_up and found_up[0].exists():
+                if found_up and found_up[0].exists() and found_up[0].is_file():
                     file_path = found_up[0]
 
-        # 4. Check project root directory
-        if not file_path:
-            root_dir = Path(__file__).parent
-            found_root = list(root_dir.rglob(clean_filename))
-            if found_root and found_root[0].exists():
-                file_path = found_root[0]
-
         if not file_path or not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"File '{filename}' not found.")
+            raise HTTPException(status_code=404, detail=f"File '{filename}' not found in workspace.")
 
-        media_type, _ = mimetypes.guess_type(str(file_path))
+        # Security Guard 2: Final path boundary verification (Must be inside workspace/{thread_id} or data/uploads/{thread_id})
+        resolved_file = file_path.resolve()
+        ws_root = (Path("workspace") / thread_id).resolve()
+        upload_root = (Path("data/uploads") / thread_id).resolve()
+
+        is_in_ws = False
+        is_in_up = False
+
+        try:
+            resolved_file.relative_to(ws_root)
+            is_in_ws = True
+        except ValueError:
+            pass
+
+        try:
+            resolved_file.relative_to(upload_root)
+            is_in_up = True
+        except ValueError:
+            pass
+
+        if not (is_in_ws or is_in_up):
+            raise HTTPException(status_code=403, detail="Forbidden: Path lies outside thread storage boundary.")
+
+        media_type, _ = mimetypes.guess_type(str(resolved_file))
         if not media_type:
             lower_name = clean_filename.lower()
             if lower_name.endswith('.md'):
                 media_type = 'text/markdown'
-            elif lower_name.endswith('.py'):
-                media_type = 'text/x-python'
             elif lower_name.endswith('.json'):
                 media_type = 'application/json'
             elif lower_name.endswith('.docx'):
@@ -814,7 +835,7 @@ def download_workspace_file(
         disposition = "attachment" if (download or not is_image) else "inline"
 
         return FileResponse(
-            path=str(file_path),
+            path=str(resolved_file),
             filename=clean_filename,
             media_type=media_type,
             content_disposition_type=disposition

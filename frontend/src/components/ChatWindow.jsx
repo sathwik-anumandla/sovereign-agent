@@ -78,6 +78,13 @@ function RegenerateResponseButton({ onRegenerate, isStreaming }) {
 function extractGeneratedFiles(msg, messages = []) {
   if (!msg) return [];
 
+  // Blacklist of system/source code files and configs that must NEVER be shown as deliverables
+  const BLACKLIST_FILES = new Set([
+    'server.py', 'graph.py', 'route.py', 'registry.py', 'db.py', 'tool_interface.py',
+    'phase1_inference.py', 'config_loader.py', 'package.json', 'models_config.json',
+    'requirements.txt', '.env', 'dockerfile', 'tsconfig.json'
+  ]);
+
   // 1. Collect all uploaded file names from all messages in the conversation
   const uploadedFileNames = new Set();
   messages.forEach((m) => {
@@ -112,6 +119,10 @@ function extractGeneratedFiles(msg, messages = []) {
         if (args.file_path) inputToolFiles.add(args.file_path.split(/[/\\]/).pop().toLowerCase());
       }
     }
+    if (toolName.includes('rag_kb')) {
+      if (args.file_path) inputToolFiles.add(args.file_path.split(/[/\\]/).pop().toLowerCase());
+      if (args.document_name) inputToolFiles.add(args.document_name.split(/[/\\]/).pop().toLowerCase());
+    }
   });
 
   const filesMap = new Map();
@@ -123,19 +134,25 @@ function extractGeneratedFiles(msg, messages = []) {
 
     const lowerClean = cleanName.toLowerCase();
 
-    // STRICT FILTER: Do NOT include uploaded files or tool input files!
+    // STRICT FILTER 1: Blacklisted system/source code files
+    if (BLACKLIST_FILES.has(lowerClean)) {
+      return;
+    }
+
+    // STRICT FILTER 2: Do NOT include uploaded files or tool input files!
     if (uploadedFileNames.has(lowerClean) || inputToolFiles.has(lowerClean)) {
       return;
     }
 
+    // Allowed deliverable extensions ONLY (documents, slides, spreadsheets, PDFs, generated images, archives)
+    const validExts = ['docx', 'pptx', 'xlsx', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'csv', 'zip'];
     const ext = (cleanName.split('.').pop() || '').toLowerCase();
-    const validExts = ['docx', 'pptx', 'xlsx', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'csv', 'txt', 'html', 'json', 'md', 'py', 'zip'];
     if (validExts.includes(ext) && !filesMap.has(cleanName)) {
       filesMap.set(cleanName, { filename: cleanName, rawPath: rawPath || cleanName });
     }
   };
 
-  // 3. Scan tool calls for output generated files
+  // 3. Scan tool calls for output generated files ONLY
   toolCalls.forEach((tc) => {
     const toolName = (tc.name || tc.tool_name || tc.tool || '').toLowerCase();
     const args = tc.args || tc.input || {};
@@ -157,22 +174,18 @@ function extractGeneratedFiles(msg, messages = []) {
 
     if (toolName.includes('code_sandbox') || toolName.includes('sandbox')) {
       const resStr = typeof res === 'string' ? res : JSON.stringify(res);
-      const matches = resStr.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/|(?:\b|\/))([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|txt|html|json|md|py|zip))/gi);
+      const matches = resStr.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/)([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|zip))/gi);
       for (const match of matches) {
         addFile(match[1], match[0]);
       }
     }
   });
 
-  // 4. Scan assistant message content text for markdown file links or explicitly mentioned generated files
+  // 4. Scan assistant message content ONLY for explicit markdown links in workspace/uploads directory
   if (msg.content) {
-    const linkMatches = msg.content.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g);
+    const linkMatches = msg.content.matchAll(/\[([^\]]+)\]\(((?:workspace\/|data\/uploads\/)[^)]+)\)/g);
     for (const match of linkMatches) {
       addFile(match[2], match[2]);
-    }
-    const textMatches = msg.content.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/|`)([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|txt|html|json|md|py|zip))/gi);
-    for (const match of textMatches) {
-      addFile(match[1], match[0]);
     }
   }
 
