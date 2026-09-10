@@ -27,7 +27,9 @@ import {
   User,
   Key,
   LogOut,
-  Sliders
+  Sliders,
+  RotateCcw,
+  Pencil
 } from 'lucide-react';
 import ToolCard from './ToolCard';
 import AgenticWorkflowStepper from './AgenticWorkflowStepper';
@@ -43,20 +45,33 @@ function CopyResponseButton({ text }) {
   };
 
   return (
-    <div className="pt-1 flex items-center text-xs theme-text-muted">
-      <button
-        type="button"
-        onClick={handleCopy}
-        className="flex items-center justify-center rounded-md p-1 theme-text-muted hover:theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
-        title={copied ? "Copied" : "Copy response"}
-      >
-        {copied ? (
-          <Check className="h-3.5 w-3.5 text-emerald-400" />
-        ) : (
-          <Copy className="h-3.5 w-3.5" />
-        )}
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="flex items-center justify-center rounded-md p-1 theme-text-muted hover:theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
+      title={copied ? "Copied" : "Copy response"}
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-emerald-400" />
+      ) : (
+        <Copy className="h-3.5 w-3.5" />
+      )}
+    </button>
+  );
+}
+
+function RegenerateResponseButton({ onRegenerate, isStreaming }) {
+  return (
+    <button
+      type="button"
+      onClick={onRegenerate}
+      disabled={isStreaming}
+      className="flex items-center gap-1 rounded-md p-1 px-1.5 theme-text-muted hover:theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer disabled:opacity-40"
+      title="Regenerate response"
+    >
+      <RotateCcw className={`h-3.5 w-3.5 ${isStreaming ? 'animate-spin' : ''}`} />
+      <span className="text-[11px] font-medium">Regenerate</span>
+    </button>
   );
 }
 
@@ -388,6 +403,39 @@ export default function ChatWindow({
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
+
+  const [editingMsgIdx, setEditingMsgIdx] = useState(null);
+  const [editInputText, setEditInputText] = useState('');
+
+  const handleSaveEditPrompt = (idx) => {
+    if (isStreaming || !editInputText.trim()) return;
+    const targetMsg = messages[idx];
+    const fileIds = (targetMsg?.attachedFiles || []).map((f) => f.file_id || f.id).filter(Boolean);
+    const attachedFiles = targetMsg?.attachedFiles || [];
+    const text = editInputText.trim();
+    setEditingMsgIdx(null);
+    onSendMessage(text, fileIds, attachedFiles, selectedModelMode, idx);
+  };
+
+  const handleRegenerateResponse = (assistantIdx) => {
+    if (isStreaming) return;
+    let userIdx = -1;
+    for (let i = assistantIdx - 1; i >= 0; i--) {
+      if (messages[i] && messages[i].role === 'user') {
+        userIdx = i;
+        break;
+      }
+    }
+
+    if (userIdx === -1) return;
+
+    const userMsg = messages[userIdx];
+    const fileIds = (userMsg.attachedFiles || []).map((f) => f.file_id || f.id).filter(Boolean);
+    const attachedFiles = userMsg.attachedFiles || [];
+    const text = userMsg.content || '';
+
+    onSendMessage(text, fileIds, attachedFiles, selectedModelMode, userIdx);
+  };
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -891,9 +939,62 @@ export default function ChatWindow({
                         })}
                       </div>
                     )}
-                    <div className="rounded-2xl bg-[var(--bg-user-chip)] border-0 px-4 py-3 text-sm text-[var(--text-user-chip)] leading-relaxed font-sans">
-                      {msg.content}
-                    </div>
+                    {editingMsgIdx === idx ? (
+                      <div className="ml-auto w-full max-w-[85%] space-y-2 card-bg rounded-2xl p-3.5 border-0 shadow-sm">
+                        <div className="text-xs font-semibold theme-text-secondary mb-1">Edit Prompt</div>
+                        <textarea
+                          value={editInputText}
+                          onChange={(e) => setEditInputText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSaveEditPrompt(idx);
+                            }
+                          }}
+                          rows={2}
+                          className="w-full resize-none border-0 bg-[var(--bg-input)] p-2.5 text-xs theme-text-primary rounded-xl focus:outline-none leading-relaxed font-sans"
+                        />
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setEditingMsgIdx(null)}
+                            className="rounded-lg px-3 py-1 text-xs theme-text-muted hover:bg-[var(--bg-hover)] border-0 cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveEditPrompt(idx)}
+                            disabled={!editInputText.trim() || isStreaming}
+                            className="rounded-lg bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] px-3.5 py-1 text-xs font-semibold hover:opacity-90 transition-all border-0 cursor-pointer disabled:opacity-50"
+                          >
+                            Save & Submit
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="relative group/userchip flex flex-col items-end">
+                        <div className="rounded-2xl bg-[var(--bg-user-chip)] border-0 px-4 py-3 text-sm text-[var(--text-user-chip)] leading-relaxed font-sans">
+                          {msg.content}
+                        </div>
+                        {!isStreaming && (
+                          <div className="pt-1 flex items-center justify-end opacity-80 hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingMsgIdx(idx);
+                                setEditInputText(msg.content || '');
+                              }}
+                              className="flex items-center gap-1 rounded-md p-1 px-1.5 text-xs theme-text-muted hover:theme-text-primary hover:bg-[var(--bg-hover)] transition-colors border-0 bg-transparent cursor-pointer"
+                              title="Edit prompt"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              <span className="text-[11px]">Edit</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   /* Assistant Message: Agentic Workflow Stepper, Ephemeral Ambient Status Strip & Deliverable Output */
@@ -925,7 +1026,13 @@ export default function ChatWindow({
                           {msg.content}
                         </ReactMarkdown>
                         {(!isStreaming || !isLastAssistant) && (
-                          <CopyResponseButton text={msg.content} />
+                          <div className="pt-1.5 flex items-center gap-2 text-xs theme-text-muted">
+                            <CopyResponseButton text={msg.content} />
+                            <RegenerateResponseButton
+                              onRegenerate={() => handleRegenerateResponse(idx)}
+                              isStreaming={isStreaming}
+                            />
+                          </div>
                         )}
                       </div>
                     )}

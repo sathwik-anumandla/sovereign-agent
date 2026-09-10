@@ -385,15 +385,20 @@ export default function App() {
     return null;
   };
 
-  const handleSendMessage = async (content, fileIds, attachedFiles, modelOverride = 'auto') => {
+  const handleSendMessage = async (content, fileIds, attachedFiles, modelOverride = 'auto', truncateIndex = null) => {
     if (!activeThreadId || isStreaming || !token) return;
 
     setConnectionError(null);
     setIsStreaming(true);
     setToolCallsMap([]);
 
+    let baseMessages = messages;
+    if (truncateIndex !== null && truncateIndex !== undefined && truncateIndex >= 0) {
+      baseMessages = messages.slice(0, truncateIndex);
+    }
+
     const newMessages = [
-      ...messages,
+      ...baseMessages,
       {
         role: 'user',
         content: content,
