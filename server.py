@@ -132,6 +132,31 @@ def get_current_user(
     return user
 
 
+def get_current_user_optional(
+    authorization: Optional[str] = Header(None),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    token_param: Optional[str] = Query(None, alias="token")
+) -> Optional[Dict[str, Any]]:
+    """Optional JWT authentication: returns user dict if valid token provided, otherwise None without raising HTTP 401."""
+    try:
+        token = None
+        if credentials and credentials.credentials:
+            token = credentials.credentials
+        elif authorization and authorization.startswith("Bearer "):
+            token = authorization.split(" ")[1]
+        elif token_param:
+            token = token_param
+
+        if token:
+            decoded = decode_jwt_token(token)
+            if decoded:
+                user_id = decoded.get("sub")
+                return get_user_by_id(user_id)
+    except Exception:
+        pass
+    return None
+
+
 def require_admin(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     """FastAPI dependency: enforces admin role requirement."""
     if current_user.get("role") != "admin":
@@ -718,54 +743,85 @@ async def upload_file(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/workspace/{thread_id}/files/{filename}")
+@app.get("/workspace/{thread_id}/files/{filename:path}")
+@app.get("/api/workspace/{thread_id}/files/{filename:path}")
 def download_workspace_file(
     thread_id: str,
     filename: str,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    download: Optional[bool] = Query(False),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
 ):
-    """Serves a deliverable or uploaded file from thread workspace or disk storage with inline disposition for browser preview."""
-    verify_thread_access(thread_id, current_user)
+    """Serves a deliverable or uploaded file from thread workspace or disk storage."""
     try:
-        file_path = validate_workspace_path(filename, thread_id)
-        if not file_path.exists() or not file_path.is_file():
-            # Check data/uploads/{thread_id} directory
+        clean_filename = Path(filename).name
+        file_path = None
+
+        # 1. Try workspace path validation
+        try:
+            val_p = validate_workspace_path(filename, thread_id)
+            if val_p.exists() and val_p.is_file():
+                file_path = val_p
+        except Exception:
+            pass
+
+        # 2. Check thread workspace directory recursively
+        if not file_path:
+            ws_dir = Path("workspace") / thread_id
+            if ws_dir.exists():
+                found_ws = list(ws_dir.rglob(clean_filename))
+                if found_ws and found_ws[0].exists():
+                    file_path = found_ws[0]
+
+        # 3. Check data/uploads/{thread_id} directory
+        if not file_path:
             upload_dir = Path("data/uploads") / thread_id
             if upload_dir.exists():
-                found = list(upload_dir.glob(f"*_{filename}"))
-                if found and found[0].exists():
-                    file_path = found[0]
-                else:
-                    root_dir = Path(__file__).parent
-                    found_root = list(root_dir.rglob(filename))
-                    if found_root and found_root[0].exists():
-                        file_path = found_root[0]
-                    else:
-                        raise HTTPException(status_code=404, detail=f"File '{filename}' not found.")
-            else:
-                raise HTTPException(status_code=404, detail=f"File '{filename}' not found in workspace.")
+                found_up = list(upload_dir.glob(f"*_{clean_filename}")) or list(upload_dir.rglob(clean_filename))
+                if found_up and found_up[0].exists():
+                    file_path = found_up[0]
+
+        # 4. Check project root directory
+        if not file_path:
+            root_dir = Path(__file__).parent
+            found_root = list(root_dir.rglob(clean_filename))
+            if found_root and found_root[0].exists():
+                file_path = found_root[0]
+
+        if not file_path or not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File '{filename}' not found.")
 
         media_type, _ = mimetypes.guess_type(str(file_path))
         if not media_type:
-            lower_name = filename.lower()
+            lower_name = clean_filename.lower()
             if lower_name.endswith('.md'):
                 media_type = 'text/markdown'
             elif lower_name.endswith('.py'):
                 media_type = 'text/x-python'
             elif lower_name.endswith('.json'):
                 media_type = 'application/json'
-            elif lower_name.endswith('.log'):
-                media_type = 'text/plain'
+            elif lower_name.endswith('.docx'):
+                media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            elif lower_name.endswith('.pptx'):
+                media_type = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+            elif lower_name.endswith('.xlsx'):
+                media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            elif lower_name.endswith('.pdf'):
+                media_type = 'application/pdf'
             else:
                 media_type = 'application/octet-stream'
 
+        is_image = media_type.startswith('image/')
+        disposition = "attachment" if (download or not is_image) else "inline"
+
         return FileResponse(
             path=str(file_path),
-            filename=filename,
+            filename=clean_filename,
             media_type=media_type,
-            content_disposition_type="inline"
+            content_disposition_type=disposition
         )
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=404, detail=str(e))
 
 

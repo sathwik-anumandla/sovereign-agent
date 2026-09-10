@@ -60,6 +60,107 @@ function CopyResponseButton({ text }) {
   );
 }
 
+function extractGeneratedFiles(msg) {
+  if (!msg) return [];
+  const filesMap = new Map();
+
+  const addFile = (filename, rawPath) => {
+    if (!filename) return;
+    const cleanName = filename.split(/[/\\]/).pop().split('?')[0];
+    if (!cleanName) return;
+    const ext = (cleanName.split('.').pop() || '').toLowerCase();
+    const validExts = ['docx', 'pptx', 'xlsx', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'csv', 'txt', 'html', 'json', 'md', 'py', 'zip'];
+    if (validExts.includes(ext) && !filesMap.has(cleanName)) {
+      filesMap.set(cleanName, { filename: cleanName, rawPath: rawPath || cleanName });
+    }
+  };
+
+  // 1. Scan tool calls and results
+  const toolCalls = msg.toolCalls || [];
+  toolCalls.forEach((tc) => {
+    const args = tc.args || tc.input || {};
+    const res = tc.result || tc.output || {};
+    
+    if (args.output_filename) addFile(args.output_filename, args.output_filename);
+    if (args.filename) addFile(args.filename, args.filename);
+    if (args.target_file) addFile(args.target_file, args.target_file);
+    if (args.file_path) addFile(args.file_path, args.file_path);
+
+    const strContent = JSON.stringify(args) + ' ' + (typeof res === 'string' ? res : JSON.stringify(res));
+    const matches = strContent.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/|(?:\b|\/))([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|txt|html|json|md|py|zip))/gi);
+    for (const match of matches) {
+      addFile(match[1], match[0]);
+    }
+  });
+
+  // 2. Scan assistant message content text for markdown file links or filenames
+  if (msg.content) {
+    const linkMatches = msg.content.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g);
+    for (const match of linkMatches) {
+      addFile(match[2], match[2]);
+    }
+    const textMatches = msg.content.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/|`|\b)([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|txt|html|json|md|py|zip))/gi);
+    for (const match of textMatches) {
+      addFile(match[1], match[0]);
+    }
+  }
+
+  return Array.from(filesMap.values());
+}
+
+function DeliverableCard({ file, threadId, token, onPreview }) {
+  const filename = file.filename;
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext);
+  
+  const downloadUrl = `http://localhost:8000/workspace/${threadId}/files/${encodeURIComponent(filename)}?download=true${token ? `&token=${token}` : ''}`;
+  const inlineUrl = `http://localhost:8000/workspace/${threadId}/files/${encodeURIComponent(filename)}${token ? `?token=${token}` : ''}`;
+
+  return (
+    <div className="flex items-center justify-between rounded-xl border border-[var(--bg-hover)]/40 bg-[var(--bg-card)] p-3 my-2 shadow-xs transition-all hover:border-[var(--bg-hover)]">
+      <div className="flex items-center gap-3 truncate pr-2">
+        <div className={`flex h-9 w-9 items-center justify-center rounded-lg shrink-0 ${
+          ext === 'docx' ? 'bg-blue-500/15 text-blue-400' :
+          ext === 'pptx' ? 'bg-amber-500/15 text-amber-400' :
+          ext === 'xlsx' ? 'bg-emerald-500/15 text-emerald-400' :
+          ext === 'pdf' ? 'bg-red-500/15 text-red-400' :
+          isImage ? 'bg-purple-500/15 text-purple-400' :
+          'bg-slate-500/15 theme-text-secondary'
+        }`}>
+          <FileText className="h-4 w-4" />
+        </div>
+        <div className="truncate">
+          <div className="font-semibold text-xs theme-text-primary truncate">{filename}</div>
+          <div className="text-[10px] theme-text-muted font-mono uppercase mt-0.5">{ext} Deliverable</div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 shrink-0">
+        {isImage && onPreview && (
+          <button
+            type="button"
+            onClick={() => onPreview({ filename, url: inlineUrl })}
+            className="flex items-center gap-1 rounded-lg border-0 bg-[var(--bg-input)] px-2.5 py-1.5 text-xs font-medium theme-text-primary hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+            title={`Preview ${filename}`}
+          >
+            <Eye className="h-3.5 w-3.5 text-blue-400" />
+            <span>Preview</span>
+          </button>
+        )}
+        <a
+          href={downloadUrl}
+          download={filename}
+          className="flex items-center gap-1.5 rounded-lg bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] px-3 py-1.5 text-xs font-semibold hover:opacity-90 transition-all no-underline"
+          title={`Download ${filename}`}
+        >
+          <Download className="h-3.5 w-3.5" />
+          <span>Download</span>
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function CodeBlock({ inline, className, children, ...props }) {
   const [copied, setCopied] = useState(false);
   if (inline) {
@@ -754,6 +855,8 @@ export default function ChatWindow({
                           const fname = file.filename || file.original_filename || file.name || 'Attached File';
                           const isImg = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(fname);
                           const fileUrl = activeThreadId ? `http://localhost:8000/workspace/${activeThreadId}/files/${encodeURIComponent(fname)}${token ? `?token=${token}` : ''}` : null;
+                          const downloadUrl = activeThreadId ? `http://localhost:8000/workspace/${activeThreadId}/files/${encodeURIComponent(fname)}?download=true${token ? `&token=${token}` : ''}` : null;
+
                           return (
                             <div key={fIdx} className="flex flex-col items-end gap-1 max-w-[240px]">
                               {isImg && fileUrl && (
@@ -772,15 +875,27 @@ export default function ChatWindow({
                                 </button>
                               )}
                               {fileUrl ? (
-                                <button
-                                  type="button"
-                                  onClick={() => setPreviewFile({ filename: fname, url: fileUrl })}
-                                  className="flex items-center gap-1.5 rounded-lg border-0 card-bg px-2.5 py-1 text-xs theme-text-primary hover:bg-[var(--bg-hover)] transition-colors cursor-pointer text-left"
-                                  title={`Preview ${fname}`}
-                                >
-                                  <Eye className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-                                  <span className="truncate max-w-[180px]">{fname}</span>
-                                </button>
+                                isImg ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewFile({ filename: fname, url: fileUrl })}
+                                    className="flex items-center gap-1.5 rounded-lg border-0 card-bg px-2.5 py-1 text-xs theme-text-primary hover:bg-[var(--bg-hover)] transition-colors cursor-pointer text-left"
+                                    title={`Preview ${fname}`}
+                                  >
+                                    <Eye className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+                                    <span className="truncate max-w-[180px]">{fname}</span>
+                                  </button>
+                                ) : (
+                                  <a
+                                    href={downloadUrl}
+                                    download={fname}
+                                    className="flex items-center gap-1.5 rounded-lg border-0 card-bg px-2.5 py-1 text-xs theme-text-primary hover:bg-[var(--bg-hover)] transition-colors cursor-pointer text-left no-underline"
+                                    title={`Download ${fname}`}
+                                  >
+                                    <Download className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                                    <span className="truncate max-w-[180px]">{fname}</span>
+                                  </a>
+                                )
                               ) : (
                                 <div className="flex items-center gap-1.5 rounded-lg border-0 card-bg px-2.5 py-1 text-xs theme-text-primary">
                                   <File className="h-3.5 w-3.5 theme-text-muted shrink-0" />
@@ -830,6 +945,28 @@ export default function ChatWindow({
                         )}
                       </div>
                     )}
+
+                    {/* Generated Deliverables Section */}
+                    {(() => {
+                      const deliverables = extractGeneratedFiles(msg);
+                      if (deliverables.length === 0) return null;
+                      return (
+                        <div className="pt-2 space-y-2">
+                          <div className="text-xs font-semibold theme-text-muted font-mono uppercase tracking-wider pl-1">
+                            Generated Deliverables
+                          </div>
+                          {deliverables.map((del, dIdx) => (
+                            <DeliverableCard
+                              key={dIdx}
+                              file={del}
+                              threadId={activeThreadId}
+                              token={token}
+                              onPreview={setPreviewFile}
+                            />
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
