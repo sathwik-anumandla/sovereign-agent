@@ -98,30 +98,20 @@ function extractGeneratedFiles(msg, messages = []) {
     }
   });
 
-  // 2. Collect all input file paths passed to reading/analysis tools in this turn
+  // 2. Collect all input file paths passed to ANY tool as inputs
   const inputToolFiles = new Set();
   const toolCalls = msg.toolCalls || [];
   toolCalls.forEach((tc) => {
-    const toolName = (tc.name || tc.tool_name || tc.tool || (tc.function && tc.function.name) || '').toLowerCase();
     const args = tc.args || tc.input || tc.tool_input || (tc.function && tc.function.arguments) || {};
-
-    if (toolName.includes('ocr') || toolName.includes('vlm')) {
-      if (args.image_path) inputToolFiles.add(args.image_path.split(/[/\\]/).pop().toLowerCase());
-      if (args.file_path) inputToolFiles.add(args.file_path.split(/[/\\]/).pop().toLowerCase());
-    }
-    if (toolName.includes('spreadsheet') || toolName.includes('csv')) {
-      if (args.file_path) inputToolFiles.add(args.file_path.split(/[/\\]/).pop().toLowerCase());
-      if (args.filepath) inputToolFiles.add(args.filepath.split(/[/\\]/).pop().toLowerCase());
-    }
-    if (toolName.includes('file_io')) {
-      if (args.action === 'read' || args.mode === 'read' || !args.action) {
-        if (args.filepath) inputToolFiles.add(args.filepath.split(/[/\\]/).pop().toLowerCase());
-        if (args.file_path) inputToolFiles.add(args.file_path.split(/[/\\]/).pop().toLowerCase());
-      }
-    }
-    if (toolName.includes('rag_kb')) {
-      if (args.file_path) inputToolFiles.add(args.file_path.split(/[/\\]/).pop().toLowerCase());
-      if (args.document_name) inputToolFiles.add(args.document_name.split(/[/\\]/).pop().toLowerCase());
+    if (typeof args === 'object' && args !== null) {
+      Object.values(args).forEach((val) => {
+        if (typeof val === 'string') {
+          const cleanVal = val.split(/[/\\]/).pop().split('?')[0].toLowerCase();
+          if (cleanVal.includes('.')) {
+            inputToolFiles.add(cleanVal);
+          }
+        }
+      });
     }
   });
 
@@ -152,12 +142,13 @@ function extractGeneratedFiles(msg, messages = []) {
     }
   };
 
-  // 3. Scan tool calls for output generated files (inspecting args, tool_input, output_summary, raw_output, result)
+  // 3. Scan tool calls for EXPLICIT output generated files
   toolCalls.forEach((tc) => {
     const toolName = (tc.name || tc.tool_name || tc.tool || (tc.function && tc.function.name) || '').toLowerCase();
     const args = tc.args || tc.input || tc.tool_input || (tc.function && tc.function.arguments) || {};
     const res = tc.result || tc.output || tc.output_summary || tc.raw_output || {};
 
+    // Generation tool 1: doc_gen
     if (toolName.includes('doc_gen')) {
       if (args.output_filename) addFile(args.output_filename, args.output_filename);
       if (args.filename) addFile(args.filename, args.filename);
@@ -168,27 +159,28 @@ function extractGeneratedFiles(msg, messages = []) {
       }
     }
 
-    if (toolName.includes('file_io') && (args.action === 'write' || args.mode === 'write')) {
+    // Generation tool 2: file_io (write / create action)
+    if (toolName.includes('file_io') && (args.action === 'write' || args.mode === 'write' || args.action === 'create')) {
       if (args.filepath) addFile(args.filepath, args.filepath);
       if (args.file_path) addFile(args.file_path, args.file_path);
     }
 
-    // String scan across tool arguments and results
-    const strContent = JSON.stringify(args) + ' ' + (typeof res === 'string' ? res : JSON.stringify(res));
-    const matches = strContent.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/|(?:\b|\/))([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|zip))/gi);
+    // Explicit output file paths starting with workspace/ or data/uploads/ in tool results
+    const resStr = typeof res === 'string' ? res : JSON.stringify(res);
+    const matches = resStr.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/)([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|zip))/gi);
     for (const match of matches) {
       addFile(match[1], match[0]);
     }
   });
 
-  // 4. Scan assistant message content text for markdown file links or mentioned generated filenames
+  // 4. Scan assistant message content text ONLY for explicit workspace/upload file links or explicit workspace paths
   if (msg.content) {
-    const linkMatches = msg.content.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g);
+    const linkMatches = msg.content.matchAll(/\[([^\]]+)\]\(((?:workspace\/|data\/uploads\/|\/workspace\/|\/data\/uploads\/)[^)]+)\)/g);
     for (const match of linkMatches) {
-      addFile(match[2], match[2]);
+      addFile(match[1], match[2]);
     }
-    const textMatches = msg.content.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/|`|\b)([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|zip))/gi);
-    for (const match of textMatches) {
+    const workspaceTextMatches = msg.content.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/)([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|zip))/gi);
+    for (const match of workspaceTextMatches) {
       addFile(match[1], match[0]);
     }
   }
