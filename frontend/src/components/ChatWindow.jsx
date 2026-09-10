@@ -262,34 +262,10 @@ function CodeBlock({ inline, className, children, ...props }) {
 }
 
 function FilePreviewModal({ file, onClose }) {
-  const [textData, setTextData] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const filename = file?.filename || 'File Preview';
+  const filename = file?.filename || 'Image Preview';
   const url = file?.url;
   const ext = (filename.split('.').pop() || '').toLowerCase();
-
   const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'].includes(ext);
-  const isPdf = ext === 'pdf';
-  const isAudio = ['mp3', 'wav', 'ogg', 'm4a'].includes(ext);
-  const isVideo = ['mp4', 'webm', 'ogv'].includes(ext);
-  const isTextLike = ['txt', 'py', 'js', 'jsx', 'ts', 'tsx', 'json', 'md', 'csv', 'log', 'yaml', 'yml', 'html', 'css', 'sh', 'env', 'sql', 'c', 'cpp', 'java', 'go', 'rs', 'rb', 'php'].includes(ext);
-
-  useEffect(() => {
-    if (isTextLike && url) {
-      setLoading(true);
-      setError(null);
-      fetch(url)
-        .then((res) => {
-          if (!res.ok) throw new Error('Failed to load file preview content.');
-          return res.text();
-        })
-        .then((data) => setTextData(data))
-        .catch((err) => setError(err.message))
-        .finally(() => setLoading(false));
-    }
-  }, [url, isTextLike]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -299,11 +275,11 @@ function FilePreviewModal({ file, onClose }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  if (!file) return null;
+  if (!file || !isImage) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="flex h-[85vh] w-full max-w-4xl flex-col rounded-2xl card-bg border-0 overflow-hidden theme-text-primary">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-150" onClick={onClose}>
+      <div className="flex h-[85vh] w-full max-w-4xl flex-col rounded-2xl card-bg border-0 overflow-hidden theme-text-primary" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between border-0 px-5 py-3.5 bg-[var(--bg-card)]">
           <div className="flex items-center gap-2.5 truncate pr-4">
@@ -320,7 +296,7 @@ function FilePreviewModal({ file, onClose }) {
                 href={url}
                 download={filename}
                 className="flex items-center gap-1.5 rounded-lg bg-[var(--bg-input)] px-3 py-1.5 text-xs font-medium theme-text-primary hover:bg-[var(--bg-hover)] transition-colors no-underline"
-                title="Download file"
+                title="Download image"
               >
                 <Download className="h-3.5 w-3.5" />
                 <span>Download</span>
@@ -339,56 +315,8 @@ function FilePreviewModal({ file, onClose }) {
 
         {/* Viewer */}
         <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-[var(--bg-sidebar)]">
-          {isImage && url && (
+          {url && (
             <img src={url} alt={filename} className="max-h-full max-w-full object-contain rounded-lg border-0" />
-          )}
-
-          {isPdf && url && (
-            <iframe src={url} title={filename} className="h-full w-full rounded-lg border-0 bg-white" />
-          )}
-
-          {isVideo && url && (
-            <video controls src={url} className="max-h-full max-w-full rounded-lg border-0" />
-          )}
-
-          {isAudio && url && (
-            <div className="w-full max-w-md p-6 rounded-xl card-bg text-center space-y-4 border-0">
-              <audio controls src={url} className="w-full" />
-            </div>
-          )}
-
-          {isTextLike && (
-            <div className="h-full w-full overflow-auto rounded-xl bg-[var(--bg-card)] p-4 font-mono text-xs text-[var(--text-primary)] leading-relaxed border-0">
-              {loading ? (
-                <div className="flex h-full items-center justify-center theme-text-muted gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Loading preview...</span>
-                </div>
-              ) : error ? (
-                <div className="flex h-full items-center justify-center text-red-400">
-                  {error}
-                </div>
-              ) : (
-                <pre className="whitespace-pre-wrap font-mono m-0">{textData}</pre>
-              )}
-            </div>
-          )}
-
-          {!isImage && !isPdf && !isVideo && !isAudio && !isTextLike && (
-            <div className="text-center p-8 space-y-3">
-              <File className="h-12 w-12 mx-auto theme-text-muted opacity-50" />
-              <p className="text-xs theme-text-muted">No visual preview engine for .{ext} files.</p>
-              {url && (
-                <a
-                  href={url}
-                  download={filename}
-                  className="inline-flex items-center gap-2 rounded-xl bg-[var(--palette-slate-dark)] text-[var(--palette-warm-sand)] px-4 py-2 text-xs font-semibold hover:opacity-90 transition-all no-underline"
-                >
-                  <Download className="h-4 w-4" />
-                  <span>Download File</span>
-                </a>
-              )}
-            </div>
           )}
         </div>
       </div>
