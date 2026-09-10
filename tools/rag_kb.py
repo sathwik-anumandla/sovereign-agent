@@ -27,61 +27,112 @@ REFERENCE_FILES_DIR = ROOT_DIR / "reference_files"
 REFERENCE_FILES_DIR.mkdir(parents=True, exist_ok=True)
 
 
+import re
+
 def extract_sections_from_file(file_path: Path) -> List[Dict[str, str]]:
     """
-    Extracts layout-aware structural sections (paragraphs, tables, headings) from document files.
-    Routes scanned/image/PDF documents through P7 ocr_vlm pipeline.
+    Extracts layout-aware structural sections (paragraphs, tables, headings, pages) from document files.
+    - PDF: Native digital extraction page-by-page via pypdfium2. If empty (scanned PDF), falls back to OCR/VLM.
+    - DOCX: Paragraph & table extraction via python-docx.
+    - TXT/CSV/MD: Line & section block extraction.
     """
     ext = file_path.suffix.lower()
-    is_ocr_target = ext in [".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".webp"]
-
     sections = []
 
-    if is_ocr_target:
+    # 1. PDF Documents
+    if ext == ".pdf":
+        try:
+            import pypdfium2
+            pdf = pypdfium2.PdfDocument(str(file_path))
+            for page_idx, page in enumerate(pdf):
+                tp = page.get_textpage()
+                page_text = tp.get_text_range().strip()
+                if page_text:
+                    blocks = [b.strip() for b in re.split(r'\n\s*\n|\n', page_text) if b.strip()]
+                    for b in blocks:
+                        sec_type = "table" if "|" in b or "\t" in b else ("heading" if len(b) < 80 and not b.endswith(".") else "paragraph")
+                        sections.append({
+                            "text": f"[Page {page_idx + 1}] {b}",
+                            "section_type": sec_type
+                        })
+        except Exception as pdf_err:
+            logger.warning(f"Digital PDF extraction failed for {file_path.name}: {pdf_err}")
+
+        # Fallback to OCR/VLM if digital text was empty (scanned PDF)
+        if not sections:
+            try:
+                from tools.ocr_vlm import ocr_vlm, OCRVLMInput
+                res = ocr_vlm(OCRVLMInput(file_path=str(file_path), input_type="printed", extract_mode="text"))
+                if res.status == ToolStatus.SUCCESS:
+                    ocr_text = str(res.metadata.get("result", "")).strip()
+                    if ocr_text:
+                        blocks = [b.strip() for b in re.split(r'\n\s*\n|\n', ocr_text) if b.strip()]
+                        for b in blocks:
+                            sec_type = "table" if "|" in b or "\t" in b else ("heading" if len(b) < 80 and not b.endswith(".") else "paragraph")
+                            sections.append({"text": b, "section_type": sec_type})
+            except Exception as ocr_err:
+                logger.warning(f"OCR PDF fallback failed for {file_path.name}: {ocr_err}")
+
+    # 2. Image Files
+    elif ext in [".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".webp"]:
         try:
             from tools.ocr_vlm import ocr_vlm, OCRVLMInput
             res = ocr_vlm(OCRVLMInput(file_path=str(file_path), input_type="printed", extract_mode="text"))
             if res.status == ToolStatus.SUCCESS:
                 ocr_text = str(res.metadata.get("result", "")).strip()
                 if ocr_text:
-                    blocks = [b.strip() for b in ocr_text.split("\n\n") if b.strip()]
+                    blocks = [b.strip() for b in re.split(r'\n\s*\n|\n', ocr_text) if b.strip()]
                     for b in blocks:
-                        sec_type = "table" if "|" in b or "\t" in b else ("heading" if len(b) < 60 and b.isupper() else "paragraph")
+                        sec_type = "table" if "|" in b or "\t" in b else ("heading" if len(b) < 80 and not b.endswith(".") else "paragraph")
                         sections.append({"text": b, "section_type": sec_type})
         except Exception:
             pass
 
-    if not sections:
+    # 3. Word Documents (.docx)
+    elif ext == ".docx":
         try:
-            raw_text = ""
-            if ext == ".docx":
-                import docx
-                doc = docx.Document(str(file_path))
-                raw_text = "\n\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-            else:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    raw_text = f.read()
+            import docx
+            doc = docx.Document(str(file_path))
+            for p in doc.paragraphs:
+                p_text = p.text.strip()
+                if p_text:
+                    sections.append({"text": p_text, "section_type": "paragraph"})
+            for table in doc.tables:
+                table_lines = []
+                for row in table.rows:
+                    row_cells = [cell.text.strip() for cell in row.cells]
+                    table_lines.append(" | ".join(row_cells))
+                if table_lines:
+                    sections.append({"text": "\n".join(table_lines), "section_type": "table"})
+        except Exception:
+            pass
 
-            blocks = [b.strip() for b in raw_text.split("\n\n") if b.strip()]
+    # 4. Text / CSV / Markdown files
+    else:
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                raw_text = f.read()
+
+            blocks = [b.strip() for b in re.split(r'\n\s*\n|\n', raw_text) if b.strip()]
             for b in blocks:
                 sec_type = "table" if "|" in b or ("," in b and "\n" in b) else ("heading" if b.startswith("#") or (len(b) < 80 and not b.endswith(".")) else "paragraph")
                 sections.append({"text": b, "section_type": sec_type})
         except Exception:
-            sections = [{"text": f"Document content from {file_path.name}", "section_type": "text"}]
+            pass
 
-    return sections if sections else [{"text": file_path.name, "section_type": "text"}]
+    return sections if sections else [{"text": f"Document content from {file_path.name}", "section_type": "text"}]
 
 
 def chunk_sections(sections: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     """
     Splits text WITHIN each structural section using RecursiveCharacterTextSplitter.
-    Preserves document structure without flattening OCR or layout segments.
+    Optimized chunk size (~500 chars) for granular vector search.
     """
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1500,
-        chunk_overlap=150,
+        chunk_size=500,
+        chunk_overlap=50,
         separators=["\n\n", "\n", ". ", " ", ""]
     )
 
