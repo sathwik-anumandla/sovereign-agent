@@ -98,11 +98,17 @@ function extractGeneratedFiles(msg, messages = []) {
     }
   });
 
-  // 2. Collect all input file paths passed to ANY tool as inputs
+  // 2. Collect all input file paths passed to read/analysis tools in this turn
   const inputToolFiles = new Set();
   const toolCalls = msg.toolCalls || [];
   toolCalls.forEach((tc) => {
+    const toolName = (tc.name || tc.tool_name || tc.tool || (tc.function && tc.function.name) || '').toLowerCase();
     const args = tc.args || tc.input || tc.tool_input || (tc.function && tc.function.arguments) || {};
+
+    // Generation tools produce OUTPUT deliverables; their arguments must NEVER be blacklisted as inputs!
+    if (toolName.includes('doc_gen')) return;
+    if (toolName.includes('file_io') && (args.action === 'write' || args.mode === 'write' || args.action === 'create')) return;
+
     if (typeof args === 'object' && args !== null) {
       Object.values(args).forEach((val) => {
         if (typeof val === 'string') {
@@ -142,12 +148,25 @@ function extractGeneratedFiles(msg, messages = []) {
     }
   };
 
-  // Explicit generated files linked to this message via backend message_id
+  // Explicit generated files linked to this message via backend message_id or SSE final event
   const explicitGenerated = msg.generatedFiles || (msg.role === 'assistant' ? msg.files : null);
   if (Array.isArray(explicitGenerated)) {
     explicitGenerated.forEach((f) => {
       const fn = f.filename || f.original_filename || f.name;
-      if (fn) addFile(fn, f.storage_path || fn);
+      if (!fn) return;
+      const cleanName = fn.split(/[/\\]/).pop().split('?')[0];
+      const lowerClean = cleanName.toLowerCase();
+      if (!BLACKLIST_FILES.has(lowerClean) && !uploadedFileNames.has(lowerClean)) {
+        const ext = (cleanName.split('.').pop() || '').toLowerCase();
+        const validExts = ['docx', 'pptx', 'xlsx', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'csv', 'zip'];
+        if (validExts.includes(ext) && !filesMap.has(cleanName)) {
+          filesMap.set(cleanName, {
+            filename: cleanName,
+            rawPath: f.storage_path || cleanName,
+            file_id: f.file_id
+          });
+        }
+      }
     });
   }
 
@@ -183,7 +202,7 @@ function extractGeneratedFiles(msg, messages = []) {
     }
   });
 
-  // 4. Scan assistant message content text ONLY for explicit workspace/upload file links or explicit workspace paths
+  // 4. Scan assistant message content text for explicit workspace paths or mentioned deliverables if doc_gen was run
   if (msg.content) {
     const linkMatches = msg.content.matchAll(/\[([^\]]+)\]\(((?:workspace\/|data\/uploads\/|\/workspace\/|\/data\/uploads\/)[^)]+)\)/g);
     for (const match of linkMatches) {
@@ -192,6 +211,18 @@ function extractGeneratedFiles(msg, messages = []) {
     const workspaceTextMatches = msg.content.matchAll(/(?:workspace\/[^\s"')`]+\/|data\/uploads\/[^\s"')`]+\/)([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf|png|jpe?g|gif|webp|svg|csv|zip))/gi);
     for (const match of workspaceTextMatches) {
       addFile(match[1], match[0]);
+    }
+
+    // If doc_gen was executed in this turn, also capture the generated document name mentioned in text
+    const hasDocGen = toolCalls.some((tc) => {
+      const tn = (tc.name || tc.tool_name || tc.tool || (tc.function && tc.function.name) || '').toLowerCase();
+      return tn.includes('doc_gen');
+    });
+    if (hasDocGen) {
+      const docMatches = msg.content.matchAll(/\b([a-zA-Z0-9_\-.]+\.(?:docx|pptx|xlsx|pdf))\b/gi);
+      for (const match of docMatches) {
+        addFile(match[1], match[1]);
+      }
     }
   }
 
