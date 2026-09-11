@@ -12,6 +12,7 @@ from tool_interface import ToolResult
 
 
 class WorkbenchState(BaseModel):
+    session_id: Optional[str] = None
     prompt: str
     file_metadata: Optional[List[FileMetadata]] = None
     route_decision: Optional[RouteDecision] = None

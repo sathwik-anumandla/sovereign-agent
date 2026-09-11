@@ -524,6 +524,7 @@ export default function App() {
                   });
                   setToolCallsMap([...activeTools]);
                 } else if (currentEvent === 'final') {
+                  const genFiles = parsedData.files || parsedData.generated_files || [];
                   setMessages((prev) => {
                     const updated = [...prev];
                     updated[assistantIndex] = {
@@ -533,7 +534,9 @@ export default function App() {
                       planSteps: parsedData.plan_steps || dynamicPlanSteps,
                       routeDecision: parsedData.route_decision || activeRouteDecision,
                       durationSeconds: parsedData.duration_seconds,
-                      hasStartedTokens: true
+                      hasStartedTokens: true,
+                      files: genFiles,
+                      generatedFiles: genFiles
                     };
                     return updated;
                   });

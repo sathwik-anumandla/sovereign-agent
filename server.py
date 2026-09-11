@@ -787,6 +787,18 @@ def download_workspace_file(
                 if found_up and found_up[0].exists() and found_up[0].is_file():
                     file_path = found_up[0]
 
+        # 3b. Backward-compatibility fallback: Check workspace/workbench_session and copy to thread workspace
+        if not file_path:
+            legacy_ws = Path("workspace") / "workbench_session"
+            if legacy_ws.exists():
+                found_legacy = list(legacy_ws.rglob(clean_filename))
+                if found_legacy and found_legacy[0].exists() and found_legacy[0].is_file():
+                    ws_dir = Path("workspace") / thread_id
+                    ws_dir.mkdir(parents=True, exist_ok=True)
+                    dest_file = ws_dir / clean_filename
+                    shutil.copy2(found_legacy[0], dest_file)
+                    file_path = dest_file
+
         if not file_path or not file_path.exists():
             raise HTTPException(status_code=404, detail=f"File '{filename}' not found in workspace.")
 
@@ -1009,6 +1021,7 @@ async def send_message(
                 existing_messages = existing_values.get("messages", [])
 
                 initial_state = WorkbenchState(
+                    session_id=thread_id,
                     prompt=content,
                     file_metadata=file_metadata_objs if file_metadata_objs else None,
                     route_decision=decision,
@@ -1037,23 +1050,103 @@ async def send_message(
             from orchestrator.graph import save_messages_to_postgres
             save_messages_to_postgres(thread_id, messages)
 
-            for tr in tool_results:
+            # Discover all generated deliverables for this thread
+            turn_deliverables = []
+            seen_files = set()
+
+            # 1. Check file_metadata table for generated deliverables
+            fm_turn_rows = execute_query(
+                "SELECT file_id, original_filename, storage_path, mime_type, file_size_bytes FROM file_metadata WHERE thread_id = %s AND (storage_path NOT LIKE '%%uploads%%' OR storage_path LIKE '%%workspace%%') ORDER BY uploaded_at DESC",
+                (thread_id,),
+                fetch_all=True
+            ) or []
+
+            for r in fm_turn_rows:
+                fname = r[1]
+                if fname not in seen_files:
+                    seen_files.add(fname)
+                    turn_deliverables.append({
+                        "file_id": str(r[0]),
+                        "filename": fname,
+                        "original_filename": fname,
+                        "storage_path": r[2],
+                        "mime_type": r[3],
+                        "file_size_bytes": r[4]
+                    })
+
+            # 2. Check workspace/{thread_id} directory directly for any generated deliverable files
+            ws_dir = Path("workspace") / thread_id
+            valid_exts = {".docx", ".pptx", ".xlsx", ".pdf", ".csv", ".zip", ".png", ".jpg", ".jpeg"}
+            if ws_dir.exists():
+                for f in ws_dir.glob("*.*"):
+                    if f.is_file() and f.suffix.lower() in valid_exts and f.name not in seen_files:
+                        seen_files.add(f.name)
+                        turn_deliverables.append({
+                            "file_id": str(uuid.uuid4()),
+                            "filename": f.name,
+                            "original_filename": f.name,
+                            "storage_path": str(f),
+                            "mime_type": "application/octet-stream",
+                            "file_size_bytes": f.stat().st_size
+                        })
+
+            # 3. Check legacy workspace/workbench_session for any newly created file (last 5 minutes)
+            legacy_ws = Path("workspace") / "workbench_session"
+            if legacy_ws.exists():
+                now_ts = time.time()
+                for f in legacy_ws.glob("*.*"):
+                    if f.is_file() and f.suffix.lower() in valid_exts and (now_ts - f.stat().st_mtime) < 300 and f.name not in seen_files:
+                        ws_dir.mkdir(parents=True, exist_ok=True)
+                        dest_f = ws_dir / f.name
+                        shutil.copy2(f, dest_f)
+                        seen_files.add(f.name)
+                        turn_deliverables.append({
+                            "file_id": str(uuid.uuid4()),
+                            "filename": f.name,
+                            "original_filename": f.name,
+                            "storage_path": str(dest_f),
+                            "mime_type": "application/octet-stream",
+                            "file_size_bytes": dest_f.stat().st_size
+                        })
+
+            # Extract assistant tool calls to match arguments with tool results
+            assistant_tool_calls = []
+            for m in messages:
+                if isinstance(m, dict) and m.get("role") == "assistant" and m.get("tool_calls"):
+                    assistant_tool_calls.extend(m.get("tool_calls"))
+
+            for idx, tr in enumerate(tool_results):
                 tr_dict = tr.model_dump() if hasattr(tr, "model_dump") else tr
                 t_name = tr_dict.get("metadata", {}).get("tool_name") or tr_dict.get("metadata", {}).get("tool") or "tool"
                 t_status = tr_dict.get("status")
                 is_success = t_status == ToolStatus.SUCCESS or t_status == "success"
 
+                corresponding_call = assistant_tool_calls[idx] if idx < len(assistant_tool_calls) else {}
+                call_args = {}
+                if isinstance(corresponding_call, dict):
+                    func_info = corresponding_call.get("function", {})
+                    call_args = func_info.get("arguments") or corresponding_call.get("arguments") or {}
+                    if isinstance(call_args, str):
+                        try:
+                            call_args = json.loads(call_args)
+                        except Exception:
+                            pass
+
+                output_path = getattr(tr, "output_path", None) or tr_dict.get("output_path") or tr_dict.get("filepath")
+                summary = tr_dict.get("metadata", {}).get("summary") or (f"Generated {output_path}" if output_path else str(tr_dict.get("data", ""))[:200])
+
                 yield {
                     "event": "tool_call_start",
-                    "data": json.dumps({"tool_name": t_name, "tool_input": tr_dict.get("input", {}), "isRunning": False})
+                    "data": json.dumps({"tool_name": t_name, "tool_input": call_args, "isRunning": False})
                 }
                 yield {
                     "event": "tool_call_result",
                     "data": json.dumps({
                         "tool_name": t_name,
                         "success": is_success,
-                        "output_summary": tr_dict.get("metadata", {}).get("summary") or str(tr_dict.get("output", ""))[:200],
-                        "raw_output": str(tr_dict.get("output", ""))
+                        "tool_input": call_args,
+                        "output_summary": summary,
+                        "raw_output": json.dumps(tr_dict)
                     })
                 }
                 yield {
@@ -1081,7 +1174,9 @@ async def send_message(
                     "content": response_text,
                     "plan_steps": plan_steps,
                     "route_decision": decision_dict,
-                    "duration_seconds": elapsed
+                    "duration_seconds": elapsed,
+                    "files": turn_deliverables,
+                    "generated_files": turn_deliverables
                 })
             }
             yield {

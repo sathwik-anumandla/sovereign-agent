@@ -161,6 +161,7 @@ function extractGeneratedFiles(msg, messages = []) {
     if (toolName.includes('doc_gen')) {
       if (args.output_filename) addFile(args.output_filename, args.output_filename);
       if (args.filename) addFile(args.filename, args.filename);
+      if (args.output_path) addFile(args.output_path, args.output_path);
       if (typeof res === 'object' && res !== null) {
         if (res.output_filepath) addFile(res.output_filepath, res.output_filepath);
         if (res.output_path) addFile(res.output_path, res.output_path);

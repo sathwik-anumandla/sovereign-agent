@@ -195,6 +195,7 @@ def route_node(state: WorkbenchState) -> dict:
         ]
 
     return {
+        "session_id": getattr(state, "session_id", None),
         "route_decision": decision,
         "messages": updated_messages
     }
@@ -278,6 +279,7 @@ def infer_node(state: WorkbenchState) -> dict:
     updated_messages = list(state.messages) + [msg_dict]
 
     return {
+        "session_id": getattr(state, "session_id", None),
         "messages": updated_messages,
         "tool_calls": raw_calls,
         "response": content if content else (state.response or "")
@@ -321,7 +323,7 @@ def tool_node(state: WorkbenchState) -> dict:
             tool_name = getattr(call, "name", "")
             raw_args = getattr(call, "arguments", {})
 
-        if isinstance(raw_args, dict) and "session_id" not in raw_args:
+        if isinstance(raw_args, dict):
             raw_args["session_id"] = session_id
 
         tool_result = None
@@ -349,7 +351,7 @@ def tool_node(state: WorkbenchState) -> dict:
 
             if validated_input is not None:
                 try:
-                    target_session_id = (isinstance(raw_args, dict) and raw_args.get("session_id")) or session_id
+                    target_session_id = session_id
                     _stage_workspace_files(state.file_metadata, session_id, target_session_id)
 
                     tool_func = TOOL_REGISTRY[tool_name]
@@ -387,6 +389,7 @@ def tool_node(state: WorkbenchState) -> dict:
         updated_messages.append(tool_msg)
 
     return {
+        "session_id": session_id,
         "messages": updated_messages,
         "tool_results": accumulated_results,
         "tool_iteration_count": state.tool_iteration_count + 1,
@@ -497,7 +500,17 @@ def save_messages_to_postgres(thread_id: str, messages: List[Dict[str, Any]]):
 
             if res and res[0]:
                 msg_id = str(res[0])
-                if sender in ("user", "assistant"):
+                if sender == "user":
+                    execute_query(
+                        """
+                        UPDATE file_metadata 
+                        SET message_id = %s 
+                        WHERE thread_id = %s AND message_id IS NULL AND storage_path LIKE '%uploads%'
+                        """,
+                        (msg_id, thread_id),
+                        commit=True
+                    )
+                elif sender == "assistant":
                     execute_query(
                         """
                         UPDATE file_metadata 
