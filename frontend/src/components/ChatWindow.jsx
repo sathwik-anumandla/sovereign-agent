@@ -31,7 +31,9 @@ import {
   LogOut,
   Sliders,
   RotateCcw,
-  Pencil
+  Pencil,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import ToolCard from './ToolCard';
 import AgenticWorkflowStepper from './AgenticWorkflowStepper';
@@ -73,6 +75,174 @@ function RegenerateResponseButton({ onRegenerate, isStreaming }) {
     >
       <RotateCcw className={`h-3.5 w-3.5 ${isStreaming ? 'animate-spin' : ''}`} />
       <span className="text-[11px] font-medium">Regenerate</span>
+    </button>
+  );
+}
+
+function sanitizeTextForSpeech(text) {
+  if (!text || typeof text !== 'string') return '';
+
+  // 1. Extract thinking trace if any
+  if (text.includes('<think>')) {
+    if (text.includes('</think>')) {
+      text = text.split('</think>').slice(1).join('</think>').trim();
+    } else {
+      text = '';
+    }
+  }
+
+  // 2. Remove multi-line code blocks
+  text = text.replace(/```[\s\S]*?```/g, ' [code block omitted] ');
+
+  // 3. Clean LaTeX math formulas
+  // Fractions (support nested braces)
+  let prev;
+  do {
+    prev = text;
+    text = text.replace(/\\frac\s*\{((?:[^{}]|\{[^{}]*\})*)\}\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g, '($1) over ($2)');
+  } while (text !== prev);
+
+  // Square roots
+  do {
+    prev = text;
+    text = text.replace(/\\sqrt\[([^\]]+)\]\{((?:[^{}]|\{[^{}]*\})*)\}/g, '$1 root of $2');
+    text = text.replace(/\\sqrt\{((?:[^{}]|\{[^{}]*\})*)\}/g, 'square root of $1');
+  } while (text !== prev);
+
+  // Math operators and symbols
+  text = text
+    .replace(/\\pm/g, ' plus or minus ')
+    .replace(/\\mp/g, ' minus or plus ')
+    .replace(/\\times/g, ' times ')
+    .replace(/\\div/g, ' divided by ')
+    .replace(/\\cdot/g, ' dot ')
+    .replace(/\\leq|\\le/g, ' is less than or equal to ')
+    .replace(/\\geq|\\ge/g, ' is greater than or equal to ')
+    .replace(/\\neq|\\ne/g, ' is not equal to ')
+    .replace(/\\approx/g, ' is approximately ')
+    .replace(/\\infty/g, ' infinity ')
+    .replace(/\\Delta/g, 'Delta')
+    .replace(/\\delta/g, 'delta')
+    .replace(/\\alpha/g, 'alpha')
+    .replace(/\\beta/g, 'beta')
+    .replace(/\\gamma/g, 'gamma')
+    .replace(/\\theta/g, 'theta')
+    .replace(/\\pi/g, 'pi')
+    .replace(/\\sigma/g, 'sigma')
+    .replace(/\\omega/g, 'omega')
+    .replace(/\\mu/g, 'mu')
+    .replace(/\\lambda/g, 'lambda')
+    .replace(/\\left\(|\\right\)/g, '')
+    .replace(/\\left\[|\\right\]/g, '')
+    .replace(/\\left\\\{|\\right\\\}/g, '')
+    .replace(/\\quad|\\qquad|\\;|\\,|\\!/g, ' ')
+    .replace(/\\text\{([^{}]+)\}/g, '$1');
+
+  // Exponents: x^{2} or x^2
+  text = text.replace(/([a-zA-Z0-9_\)\.\}]+)\^\{([^{}]+)\}/g, '$1 to the power of $2');
+  text = text.replace(/([a-zA-Z0-9_\)\.\}]+)\^([0-9a-zA-Z])/g, '$1 to the power of $2');
+
+  // Subscripts: x_1 or x_{1}
+  text = text.replace(/([a-zA-Z])_\{([^{}]+)\}/g, '$1 sub $2');
+  text = text.replace(/([a-zA-Z])_([0-9a-zA-Z]+)/g, '$1 sub $2');
+
+  // Remove math delimiters
+  text = text.replace(/\$\$(.+?)\$\$/gs, ' $1 ');
+  text = text.replace(/\$([^\$]+)\$/g, ' $1 ');
+
+  // 4. Clean Markdown syntax
+  text = text
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // images
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // links -> text
+    .replace(/`([^`]+)`/g, '$1') // inline code
+    .replace(/^#+\s+/gm, '') // headings
+    .replace(/^\s*\|?[\s\-:|]+\|?\s*$/gm, '') // table header separator lines e.g. |---|---|
+    .replace(/(\*\*|__)(.*?)\1/g, '$2') // bold
+    .replace(/(\*|_)(.*?)\1/g, '$2') // italic
+    .replace(/~~(.*?)~~/g, '$2') // strikethrough
+    .replace(/^>\s+/gm, '') // blockquotes
+    .replace(/^[*-]\s+/gm, '') // bullet lists
+    .replace(/^\d+\.\s+/gm, '') // numbered lists
+    .replace(/^[-*_]{3,}\s*$/gm, '') // hr
+    .replace(/\|/g, ', ') // table pipes
+    .replace(/,{2,}/g, ',') // multiple commas
+    .replace(/\s*,\s*,\s*/g, ', ') // clean stray commas
+    .replace(/:\s*\./g, ':') // colon dot
+    .replace(/:\s*,/g, ':') // colon comma
+    .replace(/\.\s*\./g, '.') // double period
+    .replace(/\n{2,}/g, '. ') // multiple newlines -> period
+    .replace(/\n/g, ' ') // single newline -> space
+    .replace(/\s{2,}/g, ' ') // collapse whitespace
+    .replace(/\s+([.,!?:;])/g, '$1') // clean spaces before punctuation
+    .trim();
+
+  return text;
+}
+
+function SpeakResponseButton({ text, messageIndex, activeSpeakingIndex, setActiveSpeakingIndex }) {
+  const isSpeaking = activeSpeakingIndex === messageIndex;
+
+  const handleToggleSpeak = () => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setActiveSpeakingIndex(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const cleanText = sanitizeTextForSpeech(text);
+    if (!cleanText) return;
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Samantha') || v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Siri') || v.default)) || voices.find(v => v.lang.startsWith('en'));
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+
+    utterance.onend = () => {
+      setActiveSpeakingIndex((curr) => (curr === messageIndex ? null : curr));
+    };
+    utterance.onerror = (e) => {
+      console.warn('Speech synthesis error:', e);
+      setActiveSpeakingIndex((curr) => (curr === messageIndex ? null : curr));
+    };
+
+    setActiveSpeakingIndex(messageIndex);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  if (typeof window !== 'undefined' && !('speechSynthesis' in window)) {
+    return null;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleToggleSpeak}
+      className={`flex items-center gap-1 rounded-md p-1 px-1.5 transition-colors border-0 cursor-pointer ${
+        isSpeaking
+          ? 'bg-amber-500/15 text-amber-500 hover:bg-amber-500/25 font-medium'
+          : 'theme-text-muted hover:theme-text-primary hover:bg-[var(--bg-hover)] bg-transparent'
+      }`}
+      title={isSpeaking ? "Stop reading aloud" : "Read aloud"}
+    >
+      {isSpeaking ? (
+        <>
+          <VolumeX className="h-3.5 w-3.5 text-amber-500 animate-pulse" />
+          <span className="text-[11px] font-medium text-amber-500">Stop</span>
+        </>
+      ) : (
+        <>
+          <Volume2 className="h-3.5 w-3.5" />
+          <span className="text-[11px] font-medium">Read aloud</span>
+        </>
+      )}
     </button>
   );
 }
@@ -746,6 +916,26 @@ export default function ChatWindow({
     };
   }, [isStreaming]);
 
+  // Active text-to-speech reading state
+  const [activeSpeakingIndex, setActiveSpeakingIndex] = useState(null);
+
+  // Clean up active speech when switching threads or unmounting ChatWindow
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, [activeThreadId]);
+
+  // Cancel ongoing speech when a new response starts streaming
+  useEffect(() => {
+    if (isStreaming && typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      setActiveSpeakingIndex(null);
+    }
+  }, [isStreaming]);
+
   // Auto-scroll to bottom of chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1167,6 +1357,12 @@ export default function ChatWindow({
                         {(!isStreaming || !isLastAssistant) && (
                           <div className="pt-1.5 flex items-center gap-2 text-xs theme-text-muted">
                             <CopyResponseButton text={extractThinkingAndAnswer(msg.content).answer || msg.content} />
+                            <SpeakResponseButton
+                              text={extractThinkingAndAnswer(msg.content).answer || msg.content}
+                              messageIndex={idx}
+                              activeSpeakingIndex={activeSpeakingIndex}
+                              setActiveSpeakingIndex={setActiveSpeakingIndex}
+                            />
                             <RegenerateResponseButton
                               onRegenerate={() => handleRegenerateResponse(idx)}
                               isStreaming={isStreaming}
