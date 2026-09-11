@@ -1112,22 +1112,34 @@ def get_thread_history(
 
     # Fetch files associated with thread from PostgreSQL file_metadata table
     fm_rows = execute_query(
-        "SELECT file_id, original_filename, storage_path, mime_type, file_size_bytes FROM file_metadata WHERE thread_id = %s ORDER BY uploaded_at ASC",
+        "SELECT file_id, message_id, original_filename, storage_path, mime_type, file_size_bytes FROM file_metadata WHERE thread_id = %s ORDER BY uploaded_at ASC",
         (thread_id,),
         fetch_all=True
     ) or []
 
-    thread_files = [
-        {
-            "file_id": str(r[0]),
-            "filename": r[1],
-            "original_filename": r[1],
-            "storage_path": r[2],
-            "mime_type": r[3],
-            "file_size_bytes": r[4]
+    thread_files = []
+    msg_files_map = {}
+    for r in fm_rows:
+        fid, mid, fname, spath, mtype, fsize = r
+        f_obj = {
+            "file_id": str(fid),
+            "message_id": str(mid) if mid else None,
+            "filename": fname,
+            "original_filename": fname,
+            "storage_path": spath,
+            "mime_type": mtype,
+            "file_size_bytes": fsize
         }
-        for r in fm_rows
-    ]
+        thread_files.append(f_obj)
+        if mid:
+            msg_files_map.setdefault(str(mid), []).append(f_obj)
+
+    # Fetch database messages with message_id
+    db_msgs = execute_query(
+        "SELECT message_id, sender, content, tool_calls FROM messages WHERE thread_id = %s ORDER BY created_at ASC",
+        (thread_id,),
+        fetch_all=True
+    ) or []
 
     builder = build_orchestrator_graph()
     config = {"configurable": {"thread_id": thread_id}}
@@ -1141,23 +1153,12 @@ def get_thread_history(
             raise HTTPException(status_code=404, detail=f"Thread '{thread_id}' not found: {e}")
 
         values = snapshot.values or {}
-        if not values:
+        if not values and not db_msgs:
             return {"thread_id": thread_id, "messages": [], "tool_results": [], "files": thread_files}
 
         raw_messages = values.get("messages", [])
         raw_tool_results = values.get("tool_results", [])
         route_decision = values.get("route_decision")
-
-        # Fallback to state file_metadata if database returns empty
-        if not thread_files and values.get("file_metadata"):
-            for fm in values.get("file_metadata", []):
-                fname = getattr(fm, "filename", None) or (fm.get("filename") if isinstance(fm, dict) else "")
-                if fname:
-                    thread_files.append({
-                        "file_id": str(uuid.uuid4()),
-                        "filename": fname,
-                        "original_filename": fname
-                    })
 
         formatted_tool_results = []
         for tr in raw_tool_results:
@@ -1168,24 +1169,49 @@ def get_thread_history(
 
         formatted_messages = []
         user_turn_count = 0
+        
+        # Build list of user/assistant messages matching db_msgs order
+        db_chat_msgs = [m for m in db_msgs if m[1] in ("user", "assistant")]
+        
+        raw_chat_msgs = []
         for msg in raw_messages:
-            if isinstance(msg, dict):
-                role = msg.get("role")
-                if role in ("user", "assistant"):
-                    fmt_msg = {
-                        "role": role,
-                        "content": msg.get("content", "")
-                    }
-                    if role == "user":
-                        attached = msg.get("attachedFiles") or msg.get("attached_files") or msg.get("files")
-                        if not attached and user_turn_count == 0 and thread_files:
-                            attached = thread_files
-                        if attached:
-                            fmt_msg["attachedFiles"] = attached
-                            fmt_msg["attached_files"] = attached
-                            fmt_msg["files"] = attached
-                        user_turn_count += 1
-                    formatted_messages.append(fmt_msg)
+            if isinstance(msg, dict) and msg.get("role") in ("user", "assistant"):
+                raw_chat_msgs.append(msg)
+
+        # Prefer db_chat_msgs if populated, fallback to raw_chat_msgs
+        target_msgs_len = max(len(db_chat_msgs), len(raw_chat_msgs))
+        for idx in range(target_msgs_len):
+            db_m = db_chat_msgs[idx] if idx < len(db_chat_msgs) else None
+            raw_m = raw_chat_msgs[idx] if idx < len(raw_chat_msgs) else None
+
+            msg_id = str(db_m[0]) if db_m else None
+            role = db_m[1] if db_m else raw_m.get("role")
+            content = db_m[2] if db_m else raw_m.get("content", "")
+            tool_calls = db_m[3] if db_m else (raw_m.get("tool_calls") if raw_m else None)
+
+            msg_files = msg_files_map.get(msg_id, []) if msg_id else []
+
+            fmt_msg = {
+                "message_id": msg_id,
+                "role": role,
+                "content": content,
+                "tool_calls": tool_calls,
+                "files": msg_files
+            }
+
+            if role == "user":
+                attached = msg_files or (raw_m.get("attachedFiles") if raw_m else None)
+                if not attached and user_turn_count == 0 and thread_files:
+                    attached = thread_files
+                if attached:
+                    fmt_msg["attachedFiles"] = attached
+                    fmt_msg["attached_files"] = attached
+                user_turn_count += 1
+            elif role == "assistant":
+                if msg_files:
+                    fmt_msg["generatedFiles"] = msg_files
+
+            formatted_messages.append(fmt_msg)
 
         return {
             "thread_id": thread_id,

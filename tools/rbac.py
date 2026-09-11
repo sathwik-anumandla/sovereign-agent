@@ -130,11 +130,12 @@ DEFAULT_USERS = [
 
 
 def init_rbac_db(db_path: Any = None):
-    """Ensures PostgreSQL default user accounts exist and 2FA columns are migrated."""
+    """Ensures PostgreSQL default user accounts exist and 2FA & file_metadata columns are migrated."""
     try:
         execute_query("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(128);", commit=True)
         execute_query("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT FALSE;", commit=True)
         execute_query("ALTER TABLE users ADD COLUMN IF NOT EXISTS backup_codes TEXT;", commit=True)
+        execute_query("ALTER TABLE file_metadata ADD COLUMN IF NOT EXISTS message_id UUID REFERENCES messages(message_id) ON DELETE CASCADE;", commit=True)
 
         for u in DEFAULT_USERS:
             pwd_hash = hash_password(u["password"])

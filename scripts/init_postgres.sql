@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE TABLE IF NOT EXISTS file_metadata (
     file_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     thread_id VARCHAR(64) NOT NULL REFERENCES threads(thread_id) ON DELETE CASCADE,
+    message_id UUID REFERENCES messages(message_id) ON DELETE CASCADE,
     user_id VARCHAR(64) NOT NULL REFERENCES users(user_id),
     original_filename VARCHAR(255) NOT NULL,
     storage_path TEXT NOT NULL,

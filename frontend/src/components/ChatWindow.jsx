@@ -142,6 +142,15 @@ function extractGeneratedFiles(msg, messages = []) {
     }
   };
 
+  // Explicit generated files linked to this message via backend message_id
+  const explicitGenerated = msg.generatedFiles || (msg.role === 'assistant' ? msg.files : null);
+  if (Array.isArray(explicitGenerated)) {
+    explicitGenerated.forEach((f) => {
+      const fn = f.filename || f.original_filename || f.name;
+      if (fn) addFile(fn, f.storage_path || fn);
+    });
+  }
+
   // 3. Scan tool calls for EXPLICIT output generated files
   toolCalls.forEach((tc) => {
     const toolName = (tc.name || tc.tool_name || tc.tool || (tc.function && tc.function.name) || '').toLowerCase();

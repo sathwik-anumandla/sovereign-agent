@@ -354,6 +354,22 @@ def tool_node(state: WorkbenchState) -> dict:
 
                     tool_func = TOOL_REGISTRY[tool_name]
                     tool_result = tool_func(validated_input)
+
+                    if tool_result and tool_result.status == ToolStatus.SUCCESS:
+                        possible_paths = []
+                        if hasattr(tool_result, "output_path") and getattr(tool_result, "output_path"):
+                            possible_paths.append(getattr(tool_result, "output_path"))
+                        if isinstance(getattr(tool_result, "data", None), dict):
+                            for k in ("output_path", "filepath", "path", "file_path", "output_filepath"):
+                                if tool_result.data.get(k):
+                                    possible_paths.append(tool_result.data[k])
+                        for p_str in possible_paths:
+                            try:
+                                val_p = validate_workspace_path(p_str, target_session_id, create_parents=False)
+                                if val_p.exists() and val_p.is_file():
+                                    register_generated_file_metadata(target_session_id, val_p)
+                            except Exception:
+                                pass
                 except Exception as ex:
                     tool_result = ToolResult(
                         status=ToolStatus.ERROR,
@@ -405,25 +421,92 @@ def build_orchestrator_graph():
     return builder
 
 
-def save_messages_to_postgres(thread_id: str, messages: List[Dict[str, Any]]):
-    """Saves human-readable chat messages into PostgreSQL messages table."""
+def register_generated_file_metadata(thread_id: str, file_path: Path, user_id: str = "system") -> Optional[str]:
+    """Registers a tool-generated deliverable into PostgreSQL file_metadata table."""
     try:
+        if not file_path.exists() or not file_path.is_file():
+            return None
+        clean_name = file_path.name
+        existing = execute_query(
+            "SELECT file_id FROM file_metadata WHERE thread_id = %s AND original_filename = %s",
+            (thread_id, clean_name),
+            fetch_one=True
+        )
+        if existing:
+            return str(existing[0])
+
+        file_id = str(uuid4())
+        mime = "application/octet-stream"
+        ext = file_path.suffix.lower()
+        if ext in (".docx", ".doc"): mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        elif ext in (".pptx", ".ppt"): mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        elif ext in (".xlsx", ".xls"): mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        elif ext == ".pdf": mime = "application/pdf"
+        elif ext == ".png": mime = "image/png"
+        elif ext in (".jpg", ".jpeg"): mime = "image/jpeg"
+        elif ext == ".csv": mime = "text/csv"
+
+        execute_query(
+            """
+            INSERT INTO file_metadata (file_id, thread_id, user_id, original_filename, storage_path, mime_type, file_size_bytes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (file_id, thread_id, user_id, clean_name, str(file_path), mime, file_path.stat().st_size),
+            commit=True
+        )
+        return file_id
+    except Exception as e:
+        logger.error(f"Error registering generated file metadata: {e}")
+        return None
+
+
+def save_messages_to_postgres(thread_id: str, messages: List[Dict[str, Any]]):
+    """Saves human-readable chat messages into PostgreSQL messages table and links file_metadata records to specific message IDs."""
+    try:
+        existing_msgs = execute_query(
+            "SELECT message_id, sender, content FROM messages WHERE thread_id = %s",
+            (thread_id,),
+            fetch_all=True
+        ) or []
+        existing_set = set((m[1], m[2]) for m in existing_msgs)
+
         for msg in messages:
             role = msg.get("role")
             content = msg.get("content", "")
             if role == "system":
                 continue
             sender = "user" if role == "user" else ("assistant" if role == "assistant" else "tool")
+            str_content = str(content)
+
+            if (sender, str_content) in existing_set:
+                continue
+
             tool_calls = json.dumps(msg.get("tool_calls")) if msg.get("tool_calls") else None
             tool_name = msg.get("tool_call_id") if role == "tool" else None
-            execute_query(
+            
+            res = execute_query(
                 """
                 INSERT INTO messages (thread_id, sender, content, tool_calls, tool_name)
                 VALUES (%s, %s, %s, %s, %s)
+                RETURNING message_id
                 """,
-                (thread_id, sender, str(content), tool_calls, tool_name),
+                (thread_id, sender, str_content, tool_calls, tool_name),
+                fetch_one=True,
                 commit=True
             )
+
+            if res and res[0]:
+                msg_id = str(res[0])
+                if sender in ("user", "assistant"):
+                    execute_query(
+                        """
+                        UPDATE file_metadata 
+                        SET message_id = %s 
+                        WHERE thread_id = %s AND message_id IS NULL
+                        """,
+                        (msg_id, thread_id),
+                        commit=True
+                    )
     except Exception as e:
         logger.error(f"Error saving messages to PostgreSQL: {e}")
 
