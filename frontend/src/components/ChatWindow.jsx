@@ -252,15 +252,18 @@ function DeliverableCard({ file, threadId, token, onPreview }) {
 
 function CodeBlock({ inline, className, children, ...props }) {
   const [copied, setCopied] = useState(false);
-  if (inline) {
+  const codeString = String(children).replace(/\n$/, '');
+  const isInline = inline || (!className && !codeString.includes('\n'));
+
+  if (isInline) {
     return (
-      <code className="bg-[var(--bg-input)] text-[var(--text-accent)] font-mono text-sm px-1.5 py-0.5 rounded border-0" {...props}>
+      <code className="bg-[var(--bg-input)] text-[var(--text-accent)] font-mono text-sm px-1.5 py-0.5 rounded border-0 font-medium inline" {...props}>
         {children}
       </code>
     );
   }
+
   const match = /language-(\w+)/.exec(className || '');
-  const codeString = String(children).replace(/\n$/, '');
 
   const handleCopy = () => {
     navigator.clipboard.writeText(codeString);
