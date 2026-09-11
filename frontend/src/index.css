@@ -214,3 +214,23 @@
 ::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
 }
+
+/* KaTeX Math Equations Styling */
+.katex {
+  font-size: 1.05em;
+  color: var(--text-primary);
+}
+.katex-display {
+  display: block;
+  margin: 0.85rem 0;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 0.75rem;
+  background: var(--bg-card);
+  text-align: center;
+}
+.katex-display > .katex {
+  white-space: normal;
+  text-align: initial;
+}

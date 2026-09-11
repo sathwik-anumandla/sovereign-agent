@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { 
   Paperclip, 
   ArrowUp, 
@@ -390,6 +392,31 @@ function FilePreviewModal({ file, onClose }) {
       </div>
     </div>
   );
+}
+
+function preprocessMarkdownMath(content) {
+  if (!content || typeof content !== 'string') return '';
+  let processed = content;
+
+  // 1. Convert \[ ... \] display LaTeX to $$\n...\n$$
+  processed = processed.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => {
+    return `$$\n${math.trim()}\n$$`;
+  });
+
+  // 2. Convert \( ... \) inline LaTeX to $...$
+  processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => {
+    return `$${math.trim()}$`;
+  });
+
+  // 3. Escape isolated currency amounts like $100, $2,500.50 so they don't break math parsing
+  processed = processed.replace(/(^|\s)\$(\d[\d,]*(?:\.\d+)?)(?=\s|$|[.,;!?](?:\s|$))/g, '$1\\$$$2');
+
+  // 4. Convert standalone single-line $$...$$ on its own line to multi-line $$\n...\n$$ for display math
+  processed = processed.replace(/^(\s*)\$\$(.+?)\$\$(\s*)$/gm, (_, p1, p2, p3) => {
+    return `${p1}$$\n${p2.trim()}\n$$${p3}`;
+  });
+
+  return processed;
 }
 
 const markdownComponents = {
@@ -1075,8 +1102,12 @@ export default function ChatWindow({
                     {/* Final Response Markdown Text Content */}
                     {msg.content && (
                       <div className="markdown-body font-sans text-sm theme-text-primary pt-1 pl-1">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                          {msg.content}
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: true }]]}
+                          rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
+                          components={markdownComponents}
+                        >
+                          {preprocessMarkdownMath(msg.content)}
                         </ReactMarkdown>
                         {(!isStreaming || !isLastAssistant) && (
                           <div className="pt-1.5 flex items-center gap-2 text-xs theme-text-muted">
