@@ -387,6 +387,8 @@ def get_me(current_user: Dict[str, Any] = Depends(get_current_user)):
 
 @app.get("/api/users")
 @app.get("/users")
+@app.get("/admin/users")
+@app.get("/api/admin/users")
 def list_users(current_user: Dict[str, Any] = Depends(require_admin)):
     """Admin endpoint: Lists all registered system accounts with thread stats."""
     return get_all_users()
@@ -394,6 +396,8 @@ def list_users(current_user: Dict[str, Any] = Depends(require_admin)):
 
 @app.post("/api/users")
 @app.post("/users")
+@app.post("/admin/users")
+@app.post("/api/admin/users")
 def create_user(
     payload: Dict[str, Any] = Body(...),
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -425,6 +429,8 @@ def create_user(
 
 @app.delete("/api/users/{user_id}")
 @app.delete("/users/{user_id}")
+@app.delete("/admin/users/{user_id}")
+@app.delete("/api/admin/users/{user_id}")
 def delete_user(
     user_id: str,
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -462,6 +468,7 @@ def update_password(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/admin/metrics")
 @app.get("/api/admin/metrics")
 @app.get("/admin/audit")
 @app.get("/api/admin/audit")
@@ -474,6 +481,8 @@ def admin_audit_metrics(current_user: Dict[str, Any] = Depends(require_admin)):
 # 2. SYSTEM HEALTH, MODEL CONFIGURATION & RESIDENT MODEL STATUS
 # ============================================================================
 
+@app.get("/config/models")
+@app.get("/models")
 @app.get("/api/config/models")
 @app.get("/api/models")
 def get_models_config_endpoint():
@@ -562,6 +571,8 @@ def create_thread(
 
 @app.get("/api/threads")
 @app.get("/threads")
+@app.get("/admin/threads")
+@app.get("/api/admin/threads")
 def list_threads(
     limit: int = 50,
     current_user: Dict[str, Any] = Depends(get_current_user)
@@ -654,6 +665,8 @@ def list_threads(
 
 @app.delete("/api/threads/{thread_id}")
 @app.delete("/threads/{thread_id}")
+@app.delete("/admin/threads/{thread_id}")
+@app.delete("/api/admin/threads/{thread_id}")
 def delete_thread(
     thread_id: str,
     current_user: Dict[str, Any] = Depends(require_admin)
@@ -1198,6 +1211,8 @@ async def send_message(
 @app.get("/threads/{thread_id}")
 @app.get("/api/threads/{thread_id}/history")
 @app.get("/threads/{thread_id}/history")
+@app.get("/admin/threads/{thread_id}")
+@app.get("/api/admin/threads/{thread_id}")
 def get_thread_history(
     thread_id: str,
     current_user: Dict[str, Any] = Depends(get_current_user)

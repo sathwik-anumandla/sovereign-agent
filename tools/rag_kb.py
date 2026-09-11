@@ -249,11 +249,17 @@ def get_reference_files() -> List[Dict[str, Any]]:
 
         file_list = []
         for r in rows:
+            fname = r[0] or ""
+            ext = fname.split(".")[-1].upper() if "." in fname else "PDF"
             file_list.append({
-                "source": r[0],
+                "source": fname,
+                "filename": fname,
+                "original_filename": fname,
+                "extension": ext,
                 "chunk_count": r[1],
                 "section_types": ["paragraph"],
-                "last_ingested": str(r[2]) if r[2] else ""
+                "last_ingested": str(r[2]) if r[2] else "",
+                "ingested_at": str(r[2]) if r[2] else ""
             })
         return file_list
     except Exception as e:
