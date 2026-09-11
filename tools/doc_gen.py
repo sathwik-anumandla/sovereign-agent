@@ -71,6 +71,11 @@ class XlsxSpec(BaseModel):
 # --- Tool Input & Result Models ---
 
 class DocGenInput(ToolInput):
+    """
+    Enterprise Document Deliverable Generator.
+    Produces formatted Word documents (.docx), PowerPoint slide decks (.pptx), and Excel spreadsheets (.xlsx).
+    Call this tool whenever the user asks to generate, format, create, or export an approval note, technical memo, operational report, presentation, or spreadsheet.
+    """
     format: str = Field(default="docx", description="Document format: 'docx', 'pptx', or 'xlsx'")
     spec: dict = Field(default_factory=dict, description="Document specification dictionary")
     output_path: str = Field(default="approval_note.docx", description="Output document filename or relative path")

@@ -167,11 +167,27 @@ def route_node(state: WorkbenchState) -> dict:
                     "Analyze and describe the image(s) directly from your visual input. Do NOT invoke `ocr_vlm` or external tools."
                 )
 
+    kb_context = ""
+    try:
+        from tools.rag_kb import get_reference_files
+        ref_files = get_reference_files()
+        if ref_files:
+            file_names = [f.get("source") for f in ref_files if f.get("source")]
+            if file_names:
+                kb_context = (
+                    f"\n\n[Active Enterprise Knowledge Base]: The internal knowledge base contains the following ingested reference documentation: {', '.join(file_names)}.\n"
+                    "For ANY question relating to these documents, operating procedures, equipment specifications, refinery units, or technical standards, "
+                    "you MUST autonomously call `rag_kb(query='...', operation='query')` FIRST to retrieve authoritative facts before generating your final response. "
+                    "Do not wait for the user to explicitly mention RAG or the knowledge base."
+                )
+    except Exception as e:
+        logger.warning(f"Could not load reference files for knowledge base context: {e}")
+
     fast_context = ""
     if hasattr(state, "thinking") and not state.thinking:
         fast_context = "\n\n[Fast Mode Active]: Provide a direct, concise response immediately. Do NOT output any <think>...</think> reasoning tags or internal thinking traces."
 
-    system_msg = {"role": "system", "content": sys_prompt + workspace_context + fast_context}
+    system_msg = {"role": "system", "content": sys_prompt + workspace_context + kb_context + fast_context}
     existing_messages = list(state.messages) if state.messages else []
 
     user_msg = {"role": "user", "content": state.prompt}

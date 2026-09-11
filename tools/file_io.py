@@ -13,6 +13,10 @@ from tool_interface import ToolInput, ToolResult, ToolStatus, audited_tool, vali
 
 
 class FileIOInput(ToolInput):
+    """
+    Workspace File System Management Tool.
+    Reads, writes, appends, and lists files strictly inside the session workspace boundary.
+    """
     operation: str  # "read" | "write" | "list"
     path: str
     content: Optional[str] = None

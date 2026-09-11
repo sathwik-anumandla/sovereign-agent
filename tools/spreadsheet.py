@@ -12,6 +12,10 @@ from tool_interface import ToolInput, ToolResult, ToolStatus, audited_tool, vali
 
 
 class SpreadsheetInput(ToolInput):
+    """
+    Tabular Data and CSV/Excel Analysis Tool.
+    Reads, filters, aggregates, and computes summary statistics on CSV and Excel datasets.
+    """
     file_path: str
     operation: str  # "read" | "filter" | "aggregate" | "compute"
     params: dict = Field(default_factory=dict)

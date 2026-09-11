@@ -23,6 +23,10 @@ except ImportError:
 
 
 class CodeSandboxInput(ToolInput):
+    """
+    Isolated Python Code Execution Sandbox.
+    Executes Python scripts safely to perform computations, process datasets, simulate industrial processes, or generate file artifacts.
+    """
     code: str
     language: str = "python"
     timeout_s: int = 10

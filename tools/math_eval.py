@@ -12,6 +12,10 @@ from tool_interface import ToolInput, ToolResult, ToolStatus, audited_tool
 
 
 class MathEvalInput(ToolInput):
+    """
+    Exact Symbolic Mathematics and Formula Evaluation Tool.
+    Evaluates algebraic expressions, solves equations, computes calculus derivatives/integrals, and performs exact numeric arithmetic using SymPy.
+    """
     expression: str
     variables: dict[str, float] = Field(default_factory=dict)
     mode: str = "evaluate"  # "evaluate" | "solve" | "simplify" | "differentiate" | "integrate"

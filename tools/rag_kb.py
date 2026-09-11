@@ -263,8 +263,9 @@ def get_reference_files() -> List[Dict[str, Any]]:
 
 class RagKbInput(ToolInput):
     """
-    RAG Knowledge Base Document Retrieval and Ingestion Tool.
-    Searches or manages vector database of technical reference documents and manuals.
+    Enterprise RAG Knowledge Base Retrieval & Document Management Tool.
+    Searches PostgreSQL pgvector database of technical reference manuals, operational SOPs, equipment specifications, safety guidelines, and enterprise documents.
+    IMPORTANT: Autonomously call this tool with operation='query' to retrieve verified technical facts, procedures, and parameters whenever the user asks about industrial units, equipment, operations, manuals, or company policies, even if RAG is not explicitly mentioned.
     """
     query: str = ""
     file_path: Optional[str] = None
