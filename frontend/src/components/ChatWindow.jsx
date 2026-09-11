@@ -419,6 +419,46 @@ function preprocessMarkdownMath(content) {
   return processed;
 }
 
+function extractThinkingAndAnswer(content) {
+  if (!content || typeof content !== 'string') return { thinking: '', answer: '' };
+  if (content.includes('<think>')) {
+    if (content.includes('</think>')) {
+      const parts = content.split('</think>');
+      const think = parts[0].replace('<think>', '').trim();
+      const answer = parts.slice(1).join('</think>').trim();
+      return { thinking: think, answer };
+    } else {
+      const think = content.replace('<think>', '').trim();
+      return { thinking: think, answer: '' };
+    }
+  }
+  return { thinking: '', answer: content };
+}
+
+function ThoughtBlock({ thinking, isStreaming }) {
+  const [isOpen, setIsOpen] = useState(false);
+  if (!thinking) return null;
+
+  return (
+    <div className="my-2.5 rounded-xl border border-[var(--bg-hover)]/60 bg-[var(--bg-card)]/60 p-2.5 text-xs shadow-xs">
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="flex items-center gap-2 border-0 bg-transparent p-0 theme-text-muted hover:theme-text-primary cursor-pointer font-medium text-xs"
+      >
+        <Sparkles className="h-3.5 w-3.5 text-amber-500/80" />
+        <span>{isStreaming ? 'Thinking through problem...' : (isOpen ? 'Hide Thought Process' : 'Show Thought Process')}</span>
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+      {(isOpen || isStreaming) && (
+        <div className="mt-2 pt-2 border-t border-[var(--bg-hover)]/40 theme-text-secondary whitespace-pre-wrap leading-relaxed font-sans text-xs max-h-96 overflow-y-auto">
+          {thinking}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const markdownComponents = {
   h1: ({ children }) => <h1 className="text-xl font-bold theme-text-primary mt-4 mb-2 border-0 pb-1">{children}</h1>,
   h2: ({ children }) => <h2 className="text-lg font-bold theme-text-primary mt-3 mb-2">{children}</h2>,
@@ -1102,16 +1142,31 @@ export default function ChatWindow({
                     {/* Final Response Markdown Text Content */}
                     {msg.content && (
                       <div className="markdown-body font-sans text-sm theme-text-primary pt-1 pl-1">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: true }]]}
-                          rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
-                          components={markdownComponents}
-                        >
-                          {preprocessMarkdownMath(msg.content)}
-                        </ReactMarkdown>
+                        {(() => {
+                          const { thinking: thinkingTrace, answer: mainAnswer } = extractThinkingAndAnswer(msg.content);
+                          return (
+                            <>
+                              {thinkingTrace && (
+                                <ThoughtBlock
+                                  thinking={thinkingTrace}
+                                  isStreaming={isStreaming && isLastAssistant && !mainAnswer}
+                                />
+                              )}
+                              {mainAnswer && (
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: true }]]}
+                                  rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
+                                  components={markdownComponents}
+                                >
+                                  {preprocessMarkdownMath(mainAnswer)}
+                                </ReactMarkdown>
+                              )}
+                            </>
+                          );
+                        })()}
                         {(!isStreaming || !isLastAssistant) && (
                           <div className="pt-1.5 flex items-center gap-2 text-xs theme-text-muted">
-                            <CopyResponseButton text={msg.content} />
+                            <CopyResponseButton text={extractThinkingAndAnswer(msg.content).answer || msg.content} />
                             <RegenerateResponseButton
                               onRegenerate={() => handleRegenerateResponse(idx)}
                               isStreaming={isStreaming}

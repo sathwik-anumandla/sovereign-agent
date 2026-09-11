@@ -185,7 +185,10 @@ def route_node(state: WorkbenchState) -> dict:
 
     fast_context = ""
     if hasattr(state, "thinking") and not state.thinking:
-        fast_context = "\n\n[Fast Mode Active]: Provide a direct, concise response immediately. Do NOT output any <think>...</think> reasoning tags or internal thinking traces."
+        fast_context = (
+            "\n\n[Fast Mode Active]: Provide your response directly without internal <think>...</think> tags. "
+            "For all mathematical, scientific, and engineering calculations, ALWAYS provide the complete step-by-step algebraic working, substitutions, and intermediate steps in your final markdown response."
+        )
 
     system_msg = {"role": "system", "content": sys_prompt + workspace_context + kb_context + fast_context}
     existing_messages = list(state.messages) if state.messages else []

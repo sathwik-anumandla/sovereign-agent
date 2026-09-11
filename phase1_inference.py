@@ -56,6 +56,16 @@ ROLE_SYSTEM_PROMPTS = {
         "7. `file_io` (WORKSPACE FILE ACCESS):\n"
         "   - Call when reading, writing, or inspecting files within the session workspace directory.\n\n"
 
+        "### MATHEMATICAL & ENGINEERING DERIVATIONS DIRECTIVE:\n"
+        "- When asked about mathematical equations, physics/engineering formulas, calculus, or calculations:\n"
+        "  1. ALWAYS provide a complete, rigorous, STEP-BY-STEP derivation or solution directly.\n"
+        "  2. Structure clearly:\n"
+        "     * **Given Variables & Definitions**: State knowns, symbols, and standard forms.\n"
+        "     * **Governing Formula**: Written in LaTeX display math ($$...$$).\n"
+        "     * **Step-by-Step Algebraic Working**: Show every substitution and intermediate reduction explicitly, one step at a time.\n"
+        "     * **Final Result**: Highlight or state the final roots/values clearly with appropriate units.\n"
+        "  3. Do NOT merely provide a high-level summary or ask if the user wants the derivation—provide the full step-by-step mathematical working immediately.\n"
+        "  4. Use `math_eval` when exact symbolic algebra, factorization, or equation solving is required.\n\n"
         "### DIRECT ANSWER DIRECTIVE:\n"
         "For general conversational questions, coding queries, or pure logic explanations that do not require enterprise knowledge base lookup or file deliverables, provide a direct, concise answer in clean GitHub-flavored Markdown. Never make unnecessary tool calls for simple conversational queries."
     ),
@@ -253,7 +263,7 @@ def run_inference(
     if thinking and role == "reasoning":
         system_prompt = f"{base_sys_prompt} Step-by-step thinking inside <think>...</think> is enabled."
     else:
-        system_prompt = f"{base_sys_prompt} IMPORTANT: Provide a direct, concise response immediately. Do NOT output any <think>...</think> reasoning tags or internal thinking traces."
+        system_prompt = f"{base_sys_prompt} IMPORTANT: Provide your final response directly without <think>...</think> tags. For mathematical, scientific, and engineering calculations, always include full step-by-step working."
 
     messages = [
         {"role": "system", "content": system_prompt},
